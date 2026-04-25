@@ -2,13 +2,18 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { MobileLayout } from '@/components/mobile-layout';
 import { useAureoContract } from '@/lib/hooks/useAureoContract';
 import { useAgentSettings } from '@/lib/hooks/useAgentSettings';
 import { analyzeGoldMarket, chatWithAI, getMarketInsight, GoldMarketAnalysis } from '@/lib/services/aiService';
+import { agentAutoSwap, LIFI_ASSET_MAP } from '@/lib/services/lifiService';
+import type { SavingsAssetId } from '@/lib/types';
+import { approveUSDCToLiFi, hasLiFiApproval, CHAIN_ID, RPC_URL, EXPLORER_URL } from '@/lib/services/contractService';
+import { MONAD_MAINNET } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { ethers } from 'ethers';
 import {
     ArrowLeft,
     TrendingUp,
@@ -30,7 +35,10 @@ import {
     WifiOff,
     CloudOff,
     CheckCircle2,
-    Save
+    Save,
+    Unlock,
+    ArrowDownUp,
+    ExternalLink,
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -45,14 +53,23 @@ interface AnalysisHistory {
     analysis: GoldMarketAnalysis;
     timestamp: Date;
     executed: boolean;
+    txHash?: string;
+    swapOutput?: string;
 }
+
+const ASSET_OPTIONS: { id: SavingsAssetId; label: string; icon: string; desc: string }[] = [
+    { id: 'XAUT', label: 'XAUt0', icon: '🥇', desc: 'Tether Gold — 1 token = 1 troy oz' },
+    { id: 'PAXG', label: 'WBTC', icon: '₿', desc: 'PAXG not on Monad — WBTC proxy' },
+    { id: 'WBTC', label: 'WBTC', icon: '₿', desc: 'Wrapped Bitcoin' },
+];
 
 export default function AgentPage() {
     const router = useRouter();
     const { ready, authenticated, user } = usePrivy();
-    const { balances, isLoading: contractLoading, deposit } = useAureoContract();
+    const { wallets } = useWallets();
+    const { balances, isLoading: contractLoading, getSigner: vaultGetSigner } = useAureoContract();
     
-    // Server-side Agent Settings (persists when offline)
+    // Server-side Agent Settings
     const { 
         settings: serverSettings, 
         status: agentStatus,
@@ -68,7 +85,13 @@ export default function AgentPage() {
     const [riskLevel, setRiskLevel] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate');
     const [maxAmountPerTrade, setMaxAmountPerTrade] = useState(100);
     const [agentEnabled, setAgentEnabled] = useState(false);
+    const [targetAsset, setTargetAsset] = useState<SavingsAssetId>('XAUT');
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+    // LiFi approval state
+    const [lifiApproved, setLifiApproved] = useState(false);
+    const [checkingApproval, setCheckingApproval] = useState(true);
+    const [approving, setApproving] = useState(false);
 
     // AI State
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -78,7 +101,7 @@ export default function AgentPage() {
     const [goldPrice, setGoldPrice] = useState<number>(0);
     const [error, setError] = useState<string | null>(null);
 
-    // Fetch gold price from Pyth (server-side cached) on mount
+    // Fetch gold price from Pyth on mount
     useEffect(() => {
         let cancelled = false;
         fetch('/api/price')
@@ -106,8 +129,24 @@ export default function AgentPage() {
             setRiskLevel(serverSettings.riskLevel);
             setMaxAmountPerTrade(serverSettings.maxAmountPerTrade);
             setAgentEnabled(serverSettings.enabled);
+            setTargetAsset(serverSettings.targetAsset);
         }
     }, [serverSettings]);
+
+    // Check LiFi approval status
+    useEffect(() => {
+        if (!user?.wallet?.address) {
+            setCheckingApproval(false);
+            return;
+        }
+        hasLiFiApproval(user.wallet.address).then(approved => {
+            setLifiApproved(approved);
+            setCheckingApproval(false);
+        }).catch(() => {
+            setLifiApproved(false);
+            setCheckingApproval(false);
+        });
+    }, [user?.wallet?.address]);
     
     // Track unsaved changes
     useEffect(() => {
@@ -117,10 +156,11 @@ export default function AgentPage() {
                 autoExecute !== serverSettings.autoExecute ||
                 riskLevel !== serverSettings.riskLevel ||
                 maxAmountPerTrade !== serverSettings.maxAmountPerTrade ||
-                agentEnabled !== serverSettings.enabled;
+                agentEnabled !== serverSettings.enabled ||
+                targetAsset !== serverSettings.targetAsset;
             setHasUnsavedChanges(hasChanges);
         }
-    }, [minConfidence, autoExecute, riskLevel, maxAmountPerTrade, agentEnabled, serverSettings]);
+    }, [minConfidence, autoExecute, riskLevel, maxAmountPerTrade, agentEnabled, targetAsset, serverSettings]);
     
     // Save settings to server
     const saveSettings = useCallback(async () => {
@@ -131,13 +171,14 @@ export default function AgentPage() {
                 riskLevel,
                 maxAmountPerTrade,
                 enabled: agentEnabled,
+                targetAsset,
             });
             setHasUnsavedChanges(false);
             setError(null);
         } catch (err) {
             setError('Failed to save agent settings');
         }
-    }, [updateSettings, minConfidence, autoExecute, riskLevel, maxAmountPerTrade, agentEnabled]);
+    }, [updateSettings, minConfidence, autoExecute, riskLevel, maxAmountPerTrade, agentEnabled, targetAsset]);
 
     useEffect(() => {
         if (ready && !authenticated) {
@@ -154,6 +195,63 @@ export default function AgentPage() {
         }
     }, [goldPrice]);
 
+    // Get signer for LiFi swaps
+    const getSigner = useCallback(async (): Promise<ethers.Signer> => {
+        const activeWallet = wallets.find(w => w.walletClientType === 'privy') || wallets[0];
+        if (!activeWallet) throw new Error('No wallet connected');
+        const provider = await activeWallet.getEthereumProvider();
+        const chainIdHex = `0x${CHAIN_ID.toString(16)}`;
+
+        try {
+            const currentChainId = await provider.request({ method: 'eth_chainId' });
+            if (currentChainId !== chainIdHex) {
+                try {
+                    await provider.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: chainIdHex }],
+                    });
+                } catch (switchError: unknown) {
+                    const code = (switchError as { code?: number })?.code;
+                    if (code === 4902) {
+                        await provider.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: chainIdHex,
+                                chainName: MONAD_MAINNET.name,
+                                nativeCurrency: MONAD_MAINNET.nativeCurrency,
+                                rpcUrls: [RPC_URL],
+                                blockExplorerUrls: [EXPLORER_URL],
+                            }],
+                        });
+                    } else {
+                        throw switchError;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('Chain switch warning:', err);
+        }
+
+        return new ethers.BrowserProvider(provider).getSigner();
+    }, [wallets]);
+
+    // Grant infinite USDC approval to LiFi Diamond (one-time signature)
+    const handleApproveLiFi = useCallback(async () => {
+        setApproving(true);
+        setError(null);
+        try {
+            const signer = await getSigner();
+            const result = await approveUSDCToLiFi(signer);
+            setLifiApproved(true);
+            console.log('[Agent] LiFi approval tx:', result.txHash);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Approval failed';
+            setError(msg);
+        } finally {
+            setApproving(false);
+        }
+    }, [getSigner]);
+
     const runAnalysis = useCallback(async () => {
         if (balances.usdc <= 0) {
             setError('You need USDC to run analysis');
@@ -167,14 +265,13 @@ export default function AgentPage() {
             const analysis = await analyzeGoldMarket(balances.usdc, riskLevel);
             setCurrentAnalysis(analysis);
 
-            // Add to history
             const historyEntry: AnalysisHistory = {
                 id: Date.now().toString(),
                 analysis,
                 timestamp: new Date(),
                 executed: false,
             };
-            setAnalysisHistory(prev => [historyEntry, ...prev.slice(0, 9)]); // Keep last 10
+            setAnalysisHistory(prev => [historyEntry, ...prev.slice(0, 9)]);
 
             // Auto-execute if enabled and conditions met
             if (autoExecute && analysis.action === 'BUY' && analysis.confidence >= minConfidence) {
@@ -186,30 +283,45 @@ export default function AgentPage() {
         } finally {
             setIsAnalyzing(false);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [balances.usdc, riskLevel, autoExecute, minConfidence]);
 
-    const executeRecommendation = async (analysis: GoldMarketAnalysis) => {
+    const executeRecommendation = useCallback(async (analysis: GoldMarketAnalysis) => {
         if (analysis.action !== 'BUY' || balances.usdc <= 0) return;
 
         try {
-            const result = await deposit(balances.usdc);
-            if (result.success) {
-                // Update history to mark as executed
-                setAnalysisHistory(prev =>
-                    prev.map(h =>
-                        h.analysis === analysis ? { ...h, executed: true } : h
-                    )
-                );
-                setError(null);
-            } else {
-                setError(result.error || 'Failed to execute trade');
+            const tradeAmount = Math.min(balances.usdc, maxAmountPerTrade);
+            
+            if (!lifiApproved) {
+                setError('Grant LiFi approval first — click "Unlock Auto-Swap" below');
+                return;
             }
+
+            // Execute LiFi swap: USDC -> target asset
+            const signer = await getSigner();
+            const result = await agentAutoSwap({
+                signer,
+                usdcAmount: tradeAmount,
+                targetAsset,
+            });
+
+            // Update history to mark as executed
+            setAnalysisHistory(prev =>
+                prev.map(h =>
+                    h.analysis === analysis ? { 
+                        ...h, 
+                        executed: true, 
+                        txHash: result.txHash,
+                        swapOutput: `${result.estimatedOutput.toFixed(6)} ${result.toSymbol}`,
+                    } : h
+                )
+            );
+            setError(null);
         } catch (err) {
             console.error('Execution error:', err);
-            setError('Failed to execute trade');
+            const msg = err instanceof Error ? err.message : 'Failed to execute swap';
+            setError(msg);
         }
-    };
+    }, [balances.usdc, maxAmountPerTrade, lifiApproved, targetAsset, getSigner]);
 
     const sendChatMessage = async () => {
         if (!chatInput.trim()) return;
@@ -263,7 +375,6 @@ export default function AgentPage() {
         );
     }
 
-    // Calculate stats from history
     const stats = {
         totalAnalyses: analysisHistory.length,
         buyRecommendations: analysisHistory.filter(h => h.analysis.action === 'BUY').length,
@@ -272,6 +383,8 @@ export default function AgentPage() {
             : 0,
         executedTrades: analysisHistory.filter(h => h.executed).length,
     };
+
+    const targetInfo = LIFI_ASSET_MAP[targetAsset];
 
     return (
         <MobileLayout activeTab="agent">
@@ -286,11 +399,23 @@ export default function AgentPage() {
                     </button>
                     <div className="flex-1">
                         <h1 className="text-xl font-semibold">AI Agent</h1>
-                        <p className="text-sm text-muted-foreground">Powered by Gemini Flash</p>
+                        <p className="text-sm text-muted-foreground">Powered by Gemini Flash + LiFi</p>
                     </div>
-                    <div className="flex items-center gap-1 px-3 py-1.5 bg-green-100 dark:bg-green-500/20 rounded-full">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                        <span className="text-xs font-medium text-green-600 dark:text-green-400">Active</span>
+                    <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full ${
+                        agentEnabled && autoExecute && lifiApproved
+                            ? 'bg-green-100 dark:bg-green-500/20'
+                            : 'bg-amber-100 dark:bg-amber-500/20'
+                    }`}>
+                        <div className={`w-2 h-2 rounded-full animate-pulse ${
+                            agentEnabled && autoExecute && lifiApproved ? 'bg-green-500' : 'bg-amber-500'
+                        }`} />
+                        <span className={`text-xs font-medium ${
+                            agentEnabled && autoExecute && lifiApproved
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-amber-600 dark:text-amber-400'
+                        }`}>
+                            {agentEnabled && autoExecute && lifiApproved ? 'Active' : 'Setup'}
+                        </span>
                     </div>
                 </div>
 
@@ -326,13 +451,77 @@ export default function AgentPage() {
                         </div>
                         <p className="text-2xl font-bold text-foreground">{stats.totalAnalyses}</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                            {stats.buyRecommendations} buy signals
+                            {stats.executedTrades} auto-swaps
                         </p>
                     </div>
                 </div>
             </div>
 
             <div className="px-4 space-y-6">
+                {/* ============================================ */}
+                {/* LiFi Approval — One-Time Unlock              */}
+                {/* ============================================ */}
+                <div className={`rounded-2xl border-2 overflow-hidden transition-all ${
+                    lifiApproved
+                        ? 'border-green-500/50 bg-green-50/30 dark:bg-green-900/10'
+                        : 'border-amber-500/50 bg-amber-50/30 dark:bg-amber-900/10'
+                }`}>
+                    <div className="p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                                lifiApproved
+                                    ? 'bg-green-100 dark:bg-green-500/20'
+                                    : 'bg-amber-100 dark:bg-amber-500/20'
+                            }`}>
+                                {lifiApproved ? (
+                                    <CheckCircle2 className="w-5 h-5 text-green-500" />
+                                ) : (
+                                    <Unlock className="w-5 h-5 text-amber-500" />
+                                )}
+                            </div>
+                            <div>
+                                <h3 className="font-semibold text-sm">
+                                    {lifiApproved ? 'Auto-Swap Unlocked' : 'Unlock Auto-Swap'}
+                                </h3>
+                                <p className="text-xs text-muted-foreground">
+                                    {lifiApproved
+                                        ? 'USDC approved to LiFi — agent can swap anytime'
+                                        : 'One signature to let agent swap USDC via LiFi'}
+                                </p>
+                            </div>
+                        </div>
+                        {!lifiApproved && (
+                            <Button
+                                onClick={handleApproveLiFi}
+                                disabled={approving || checkingApproval}
+                                size="sm"
+                                className="rounded-xl bg-amber-500 hover:bg-amber-600"
+                            >
+                                {approving ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <>
+                                        <Unlock className="w-4 h-4 mr-1" />
+                                        Approve
+                                    </>
+                                )}
+                            </Button>
+                        )}
+                    </div>
+                    {!lifiApproved && !checkingApproval && (
+                        <div className="px-4 pb-4">
+                            <div className="bg-white/50 dark:bg-white/5 rounded-xl p-3 text-xs text-muted-foreground">
+                                <p className="font-medium text-foreground mb-1">How it works:</p>
+                                <ul className="space-y-1 list-disc list-inside">
+                                    <li>Sign 1 approval tx — USDC to LiFi Diamond</li>
+                                    <li>Agent can then swap USDC to {targetInfo?.symbol ?? 'target asset'} automatically</li>
+                                    <li>No more manual signatures needed for each swap</li>
+                                </ul>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
                 {/* Current Analysis */}
                 <div className="bg-card rounded-2xl border border-border overflow-hidden">
                     <div className="p-4 border-b border-border flex items-center justify-between">
@@ -411,10 +600,13 @@ export default function AgentPage() {
                             {currentAnalysis.action === 'BUY' && currentAnalysis.confidence >= minConfidence && (
                                 <Button
                                     onClick={() => executeRecommendation(currentAnalysis)}
-                                    disabled={contractLoading || balances.usdc <= 0}
+                                    disabled={contractLoading || balances.usdc <= 0 || !lifiApproved}
                                     className="w-full bg-green-500 hover:bg-green-600"
                                 >
-                                    Execute: Buy ${balances.usdc.toFixed(2)} USDC Worth
+                                    <ArrowDownUp className="w-4 h-4 mr-2" />
+                                    {lifiApproved
+                                        ? `Swap $${Math.min(balances.usdc, maxAmountPerTrade).toFixed(2)} USDC → ${targetInfo?.symbol ?? 'Asset'}`
+                                        : 'Unlock Auto-Swap First'}
                                 </Button>
                             )}
                         </div>
@@ -450,23 +642,23 @@ export default function AgentPage() {
                 )}
 
                 {/* Auto-Agent (Works Offline) */}
-                <div className={`rounded-2xl border-2 overflow-hidden transition-all ${agentEnabled && autoExecute ? 'border-green-500 bg-green-50/50 dark:bg-green-900/10' : 'border-border bg-card'}`}>
+                <div className={`rounded-2xl border-2 overflow-hidden transition-all ${agentEnabled && autoExecute && lifiApproved ? 'border-green-500 bg-green-50/50 dark:bg-green-900/10' : 'border-border bg-card'}`}>
                     <div className="p-4 border-b border-border flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${agentEnabled && autoExecute ? 'bg-green-100 dark:bg-green-500/20' : 'bg-primary/10'}`}>
-                                <Power className={`w-5 h-5 ${agentEnabled && autoExecute ? 'text-green-500' : 'text-primary'}`} />
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${agentEnabled && autoExecute && lifiApproved ? 'bg-green-100 dark:bg-green-500/20' : 'bg-primary/10'}`}>
+                                <Power className={`w-5 h-5 ${agentEnabled && autoExecute && lifiApproved ? 'text-green-500' : 'text-primary'}`} />
                             </div>
                             <div>
                                 <h3 className="font-semibold flex items-center gap-2">
                                     Auto-Agent
-                                    {agentEnabled && autoExecute && (
+                                    {agentEnabled && autoExecute && lifiApproved && (
                                         <span className="flex items-center gap-1 text-xs font-normal text-green-600 dark:text-green-400">
                                             <Wifi className="w-3 h-3" />
-                                            Works Offline
+                                            Auto-Swap Active
                                         </span>
                                     )}
                                 </h3>
-                                <p className="text-xs text-muted-foreground">AI trades for you 24/7</p>
+                                <p className="text-xs text-muted-foreground">AI swaps for you 24/7</p>
                             </div>
                         </div>
                         <button
@@ -485,19 +677,44 @@ export default function AgentPage() {
                         <div className="p-4 space-y-4 bg-gradient-to-b from-transparent to-green-50/30 dark:to-green-900/5">
                             {/* How it works */}
                             <div className="bg-white/50 dark:bg-white/5 rounded-xl p-3 text-xs text-muted-foreground">
-                                <p className="font-medium text-foreground mb-1">🤖 How Auto-Agent Works:</p>
+                                <p className="font-medium text-foreground mb-1">How Auto-Agent Works:</p>
                                 <ul className="space-y-1 list-disc list-inside">
                                     <li>AI monitors gold market every 5 minutes</li>
-                                    <li>Automatically buys when confidence meets your threshold</li>
+                                    <li>Automatically swaps USDC to your target asset via LiFi</li>
                                     <li>Works even when you close the app</li>
+                                    <li>Requires one-time LiFi approval (unlock above)</li>
                                 </ul>
+                            </div>
+
+                            {/* Target Asset Selector */}
+                            <div>
+                                <p className="font-medium text-sm mb-2">Target Asset</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {ASSET_OPTIONS.map((asset) => (
+                                        <button
+                                            key={asset.id}
+                                            onClick={() => setTargetAsset(asset.id)}
+                                            className={`py-2.5 px-3 rounded-xl text-xs font-medium transition-colors ${
+                                                targetAsset === asset.id
+                                                    ? 'bg-primary text-white'
+                                                    : 'bg-muted text-foreground hover:bg-secondary'
+                                            }`}
+                                        >
+                                            <span className="text-base">{asset.icon}</span>
+                                            <div className="mt-0.5">{asset.label}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1.5">
+                                    {ASSET_OPTIONS.find(a => a.id === targetAsset)?.desc}
+                                </p>
                             </div>
 
                             {/* Auto Execute Toggle */}
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="font-medium text-sm">Auto Execute Trades</p>
-                                    <p className="text-xs text-muted-foreground">Automatically buy gold when confident</p>
+                                    <p className="font-medium text-sm">Auto Execute Swaps</p>
+                                    <p className="text-xs text-muted-foreground">Automatically swap when confident</p>
                                 </div>
                                 <button
                                     onClick={() => setAutoExecute(!autoExecute)}
@@ -507,7 +724,7 @@ export default function AgentPage() {
                                 </button>
                             </div>
 
-                            {/* Max Amount Per Trade */}
+                            {/* Max Amount per Trade */}
                             <div>
                                 <div className="flex items-center justify-between mb-2">
                                     <p className="font-medium text-sm">Max Amount Per Trade</p>
@@ -581,9 +798,18 @@ export default function AgentPage() {
 
                             {/* Status */}
                             {!hasUnsavedChanges && autoExecute && (
-                                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                                    <CheckCircle2 className="w-4 h-4" />
-                                    <span>Auto-Agent is active and monitoring</span>
+                                <div className="space-y-2">
+                                    {lifiApproved ? (
+                                        <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                                            <CheckCircle2 className="w-4 h-4" />
+                                            <span>Auto-Agent active — swaps USDC to {targetInfo?.symbol}</span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                                            <AlertCircle className="w-4 h-4" />
+                                            <span>Grant LiFi approval to enable auto-swaps</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -604,6 +830,27 @@ export default function AgentPage() {
                         </div>
 
                         <div className="p-4 space-y-4">
+                            {/* Target Asset Selector */}
+                            <div>
+                                <p className="font-medium text-sm mb-2">Target Asset</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {ASSET_OPTIONS.map((asset) => (
+                                        <button
+                                            key={asset.id}
+                                            onClick={() => setTargetAsset(asset.id)}
+                                            className={`py-2.5 px-3 rounded-xl text-xs font-medium transition-colors ${
+                                                targetAsset === asset.id
+                                                    ? 'bg-primary text-white'
+                                                    : 'bg-muted text-foreground hover:bg-secondary'
+                                            }`}
+                                        >
+                                            <span className="text-base">{asset.icon}</span>
+                                            <div className="mt-0.5">{asset.label}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             {/* Minimum Confidence */}
                             <div>
                                 <div className="flex items-center justify-between mb-2">
@@ -638,6 +885,22 @@ export default function AgentPage() {
                                     ))}
                                 </div>
                             </div>
+
+                            {/* Save Button for manual mode */}
+                            {hasUnsavedChanges && (
+                                <Button
+                                    onClick={saveSettings}
+                                    disabled={isSaving}
+                                    className="w-full"
+                                >
+                                    {isSaving ? (
+                                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                    ) : (
+                                        <Save className="w-4 h-4 mr-2" />
+                                    )}
+                                    Save Settings
+                                </Button>
+                            )}
                         </div>
                     </div>
                 )}
@@ -742,7 +1005,10 @@ export default function AgentPage() {
                                                 {entry.analysis.confidence}%
                                             </span>
                                             {entry.executed && (
-                                                <span className="text-xs text-green-500">✓ Executed</span>
+                                                <span className="flex items-center gap-1 text-xs text-green-500">
+                                                    <CheckCircle2 className="w-3 h-3" />
+                                                    Swapped {entry.swapOutput}
+                                                </span>
                                             )}
                                         </div>
                                         <span className="text-xs text-muted-foreground">
@@ -750,22 +1016,32 @@ export default function AgentPage() {
                                         </span>
                                     </div>
                                     <p className="text-xs text-muted-foreground">{entry.analysis.reasoning}</p>
+                                    {entry.txHash && (
+                                        <a
+                                            href={`https://monadscan.com/tx/${entry.txHash}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-blue-500 hover:underline flex items-center gap-1 mt-1"
+                                        >
+                                            View tx <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    )}
                                 </div>
                             ))}
                         </div>
                     </div>
                 )}
 
-                {/* Gemini Info */}
+                {/* Gemini + LiFi Info */}
                 <div className="bg-gradient-to-r from-primary/10 to-blue-100/50 dark:from-primary/20 dark:to-blue-900/20 rounded-2xl p-4 border border-primary/20">
                     <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
                             <Shield className="w-5 h-5 text-primary" />
                         </div>
                         <div className="flex-1">
-                            <h4 className="font-semibold text-sm">Powered by Gemini Flash</h4>
+                            <h4 className="font-semibold text-sm">Gemini Flash + LiFi</h4>
                             <p className="text-xs text-muted-foreground mt-1">
-                                Fast &amp; affordable AI analysis using Google&apos;s Gemini 2.5 Flash model
+                                AI analysis by Google&apos;s Gemini 2.5 Flash. Swaps executed via LiFi protocol on Monad. One approval, autonomous trading.
                             </p>
                         </div>
                     </div>

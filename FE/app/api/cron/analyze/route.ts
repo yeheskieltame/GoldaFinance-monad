@@ -25,6 +25,8 @@ import {
   getAllActiveAgents,
   addExecutionLog,
 } from '@/lib/stores/agentStore';
+import { getMonadSwapQuote, LIFI_ASSET_MAP } from '@/lib/services/lifiService';
+import type { SavingsAssetId } from '@/lib/types';
 import { ethers } from 'ethers';
 
 export const dynamic = 'force-dynamic';
@@ -32,10 +34,11 @@ export const revalidate = 0;
 
 const PRIVATE_KEY = process.env.AI_AGENT_PRIVATE_KEY || process.env.CONTRACT_PRIVATE_KEY;
 
-async function executeDepositForUser(
+async function executeSwapForUser(
   userAddress: string,
-  usdcAmount: number
-): Promise<{ txHash: string; sharesReceived: number }> {
+  usdcAmount: number,
+  targetAsset: SavingsAssetId
+): Promise<{ txHash: string; estimatedOutput: number; toSymbol: string }> {
   if (!PRIVATE_KEY) {
     throw new Error('AI_AGENT_PRIVATE_KEY not configured for server-side execution');
   }
@@ -43,45 +46,65 @@ async function executeDepositForUser(
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 
-  const vault = new ethers.Contract(
-    CONTRACT_ADDRESSES.GOLDA_VAULT,
-    CONTRACT_ABIS.GOLDA_VAULT,
-    wallet
-  );
+  // Check if user has approved USDC to LiFi Diamond
   const usdc = new ethers.Contract(
     CONTRACT_ADDRESSES.USDC,
     CONTRACT_ABIS.USDC,
-    wallet
+    provider
   );
-
-  const amountWei = ethers.parseUnits(usdcAmount.toString(), 6);
-
-  const approveTx = await usdc.approve(CONTRACT_ADDRESSES.GOLDA_VAULT, amountWei);
-  await approveTx.wait();
-
-  const tx = await vault.deposit(amountWei);
-  const receipt = await tx.wait();
-
-  let sharesReceived = 0;
-  for (const log of receipt.logs) {
-    try {
-      const parsed = vault.interface.parseLog(log);
-      if (parsed?.name === 'Deposit') {
-        sharesReceived = Number(ethers.formatUnits(parsed.args.sharesOut, 6));
-        break;
-      }
-    } catch {
-      // skip
-    }
+  const allowance: bigint = await usdc.allowance(userAddress, CONTRACT_ADDRESSES.LIFI_DIAMOND);
+  if (allowance < ethers.MaxUint256 / BigInt(2)) {
+    throw new Error('User has not granted LiFi approval — cannot auto-swap');
   }
 
-  console.log(`✅ Auto-deposit executed for ${userAddress.slice(0, 10)}...`, {
-    usdcSpent: usdcAmount,
-    sharesReceived: sharesReceived.toFixed(6),
-    txHash: receipt.hash,
+  // Get a fresh LiFi quote for USDC -> target asset
+  const target = LIFI_ASSET_MAP[targetAsset];
+  if (!target) throw new Error(`Unknown target asset: ${targetAsset}`);
+
+  const fromAmount = ethers.parseUnits(usdcAmount.toString(), 6).toString();
+  const quote = await getMonadSwapQuote({
+    fromToken: CONTRACT_ADDRESSES.USDC,
+    toToken: target.address,
+    fromAmount,
+    fromAddress: userAddress,
   });
 
-  return { txHash: receipt.hash, sharesReceived };
+  if (!quote) {
+    throw new Error('LiFi quote failed — no route available');
+  }
+
+  // Execute the swap using the operator wallet (which forwards the user's approved USDC)
+  // In a real system, the vault operator calls execute() with the LiFi calldata.
+  // For the hackathon demo, we send the swap tx directly from the operator wallet.
+  const step = quote._step;
+  const txRequest = step.transactionRequest;
+  if (!txRequest) {
+    throw new Error('No transaction request in quote');
+  }
+
+  const tx = await wallet.sendTransaction({
+    to: txRequest.to,
+    data: txRequest.data,
+    value: txRequest.value ? BigInt(txRequest.value) : undefined,
+    gasLimit: txRequest.gasLimit ? BigInt(txRequest.gasLimit) : undefined,
+    gasPrice: txRequest.gasPrice ? BigInt(txRequest.gasPrice) : undefined,
+  });
+
+  const receipt = await tx.wait(1);
+  const txHash = receipt?.hash ?? tx.hash;
+
+  const estimatedOutput = Number(
+    ethers.formatUnits(step.estimate.toAmount, target.decimals)
+  );
+
+  console.log(`✅ Auto-swap executed for ${userAddress.slice(0, 10)}...`, {
+    usdcSpent: usdcAmount,
+    targetAsset: target.symbol,
+    estimatedOutput: estimatedOutput.toFixed(6),
+    txHash,
+  });
+
+  return { txHash, estimatedOutput, toSymbol: target.symbol };
 }
 
 async function processAgent(settings: AgentSettings): Promise<ExecutionLog> {
@@ -133,7 +156,7 @@ async function processAgent(settings: AgentSettings): Promise<ExecutionLog> {
       return log;
     }
 
-    const result = await executeDepositForUser(settings.walletAddress, tradeAmount);
+    const result = await executeSwapForUser(settings.walletAddress, tradeAmount, settings.targetAsset);
 
     const log: ExecutionLog = {
       id: executionId,
@@ -144,6 +167,8 @@ async function processAgent(settings: AgentSettings): Promise<ExecutionLog> {
       amount: tradeAmount,
       txHash: result.txHash,
       status: 'executed',
+      targetAsset: settings.targetAsset,
+      lifiToAmount: result.estimatedOutput,
       timestamp: new Date(),
     };
     addExecutionLog(log);

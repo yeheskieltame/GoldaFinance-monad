@@ -10,7 +10,7 @@ import {
 
 export interface Transaction {
     id: string;
-    type: 'deposit' | 'withdraw_request' | 'claim' | 'transfer_in' | 'transfer_out';
+    type: 'deposit' | 'withdraw_request' | 'claim' | 'swap';
     amount: number; // USDC
     shares?: number;
     withdrawalId?: number;
@@ -19,13 +19,41 @@ export interface Transaction {
     status: 'completed';
     description: string;
     blockNumber: number;
-    asset: 'usdc' | 'shares';
+    asset: 'usdc' | 'shares' | 'swap';
 }
 
 export interface TransactionFilters {
-    type?: 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'transfer';
+    type?: 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'swap';
     startDate?: Date;
     endDate?: Date;
+}
+
+// Monad RPC limits eth_getLogs to 100-block ranges.
+// We chunk queries into 99-block windows and merge results.
+const LOG_CHUNK_SIZE = 99;
+
+async function queryFilterChunked(
+    contract: ethers.Contract,
+    filter: ethers.DeferredTopicFilter,
+    fromBlock: number,
+    toBlock: number,
+): Promise<ethers.Log[]> {
+    const allLogs: ethers.Log[] = [];
+
+    for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK_SIZE) {
+        const end = Math.min(start + LOG_CHUNK_SIZE - 1, toBlock);
+        try {
+            const logs = await contract.queryFilter(filter, start, end);
+            allLogs.push(...logs);
+        } catch (err) {
+            // If a chunk fails, skip it rather than killing the whole query
+            console.warn(`[TxHistory] log query chunk ${start}-${end} failed:`, err);
+        }
+        // Tiny delay to avoid rate-limiting (25 req/s on QuickNode)
+        await new Promise(r => setTimeout(r, 50));
+    }
+
+    return allLogs;
 }
 
 export function useTransactionHistory(walletAddress: string | undefined) {
@@ -46,28 +74,23 @@ export function useTransactionHistory(walletAddress: string | undefined) {
                 CONTRACT_ABIS.GOLDA_VAULT,
                 provider
             );
-            const usdc = new ethers.Contract(
-                CONTRACT_ADDRESSES.USDC,
-                CONTRACT_ABIS.USDC,
-                provider
-            );
 
             const txList: Transaction[] = [];
             const currentBlock = await provider.getBlockNumber();
-            const fromBlock = Math.max(0, currentBlock - 100_000);
-
-            const usdcDec = Number(await usdc.decimals().catch(() => 6));
+            // Only look back 5,000 blocks (~2 hours on Monad with ~0.5s blocks)
+            // This keeps queries fast and avoids rate limits
+            const fromBlock = Math.max(0, currentBlock - 5_000);
 
             // Deposit(user, usdcIn, sharesOut)
             try {
                 const filter = vault.filters.Deposit(walletAddress);
-                const events = await vault.queryFilter(filter, fromBlock, currentBlock);
+                const events = await queryFilterChunked(vault, filter, fromBlock, currentBlock);
                 for (const ev of events) {
                     const log = ev as ethers.EventLog;
                     if (!log.args) continue;
                     const block = await ev.getBlock();
-                    const usdcIn = Number(ethers.formatUnits(log.args.usdcIn ?? 0, usdcDec));
-                    const shares = Number(ethers.formatUnits(log.args.sharesOut ?? 0, 6));
+                    const usdcIn = Number(ethers.formatUnits(log.args.usdcIn ?? 0, 6));
+                    const shares = Number(ethers.formatUnits(log.args.sharesOut ?? 0, 18));
                     txList.push({
                         id: `deposit-${ev.transactionHash}`,
                         type: 'deposit',
@@ -85,16 +108,19 @@ export function useTransactionHistory(walletAddress: string | undefined) {
                 console.error('Error fetching Deposit events:', e);
             }
 
+            // Small delay between event type queries
+            await new Promise(r => setTimeout(r, 100));
+
             // WithdrawRequested(user, id, shares, usdcOwed)
             try {
                 const filter = vault.filters.WithdrawRequested(walletAddress);
-                const events = await vault.queryFilter(filter, fromBlock, currentBlock);
+                const events = await queryFilterChunked(vault, filter, fromBlock, currentBlock);
                 for (const ev of events) {
                     const log = ev as ethers.EventLog;
                     if (!log.args) continue;
                     const block = await ev.getBlock();
-                    const shares = Number(ethers.formatUnits(log.args.shares ?? 0, 6));
-                    const owed = Number(ethers.formatUnits(log.args.usdcOwed ?? 0, usdcDec));
+                    const shares = Number(ethers.formatUnits(log.args.shares ?? 0, 18));
+                    const owed = Number(ethers.formatUnits(log.args.usdcOwed ?? 0, 6));
                     const id = Number(log.args.id ?? 0);
                     txList.push({
                         id: `wreq-${ev.transactionHash}`,
@@ -114,15 +140,17 @@ export function useTransactionHistory(walletAddress: string | undefined) {
                 console.error('Error fetching WithdrawRequested events:', e);
             }
 
+            await new Promise(r => setTimeout(r, 100));
+
             // WithdrawClaimed(id, user, usdc)
             try {
                 const filter = vault.filters.WithdrawClaimed(null, walletAddress);
-                const events = await vault.queryFilter(filter, fromBlock, currentBlock);
+                const events = await queryFilterChunked(vault, filter, fromBlock, currentBlock);
                 for (const ev of events) {
                     const log = ev as ethers.EventLog;
                     if (!log.args) continue;
                     const block = await ev.getBlock();
-                    const paid = Number(ethers.formatUnits(log.args.usdc ?? 0, usdcDec));
+                    const paid = Number(ethers.formatUnits(log.args.usdc ?? 0, 6));
                     const id = Number(log.args.id ?? 0);
                     txList.push({
                         id: `claim-${ev.transactionHash}`,
@@ -141,60 +169,9 @@ export function useTransactionHistory(walletAddress: string | undefined) {
                 console.error('Error fetching WithdrawClaimed events:', e);
             }
 
-            // USDC Transfers (external — filter out vault interactions already covered)
-            const vaultAddr = CONTRACT_ADDRESSES.GOLDA_VAULT.toLowerCase();
-
-            try {
-                const filter = usdc.filters.Transfer(null, walletAddress);
-                const events = await usdc.queryFilter(filter, fromBlock, currentBlock);
-                for (const ev of events) {
-                    const log = ev as ethers.EventLog;
-                    if (!log.args) continue;
-                    const from = (log.args.from as string).toLowerCase();
-                    if (from === vaultAddr || from === ethers.ZeroAddress.toLowerCase()) continue;
-                    const block = await ev.getBlock();
-                    const value = Number(ethers.formatUnits(log.args.value ?? 0, usdcDec));
-                    txList.push({
-                        id: `usdc-in-${ev.transactionHash}`,
-                        type: 'transfer_in',
-                        amount: value,
-                        timestamp: new Date(block.timestamp * 1000),
-                        txHash: ev.transactionHash,
-                        status: 'completed',
-                        description: `Received $${value.toFixed(2)} USDC from ${(log.args.from as string).slice(0, 6)}...${(log.args.from as string).slice(-4)}`,
-                        blockNumber: ev.blockNumber,
-                        asset: 'usdc',
-                    });
-                }
-            } catch (e) {
-                console.error('Error fetching USDC Transfer In events:', e);
-            }
-
-            try {
-                const filter = usdc.filters.Transfer(walletAddress, null);
-                const events = await usdc.queryFilter(filter, fromBlock, currentBlock);
-                for (const ev of events) {
-                    const log = ev as ethers.EventLog;
-                    if (!log.args) continue;
-                    const to = (log.args.to as string).toLowerCase();
-                    if (to === vaultAddr || to === ethers.ZeroAddress.toLowerCase()) continue;
-                    const block = await ev.getBlock();
-                    const value = Number(ethers.formatUnits(log.args.value ?? 0, usdcDec));
-                    txList.push({
-                        id: `usdc-out-${ev.transactionHash}`,
-                        type: 'transfer_out',
-                        amount: value,
-                        timestamp: new Date(block.timestamp * 1000),
-                        txHash: ev.transactionHash,
-                        status: 'completed',
-                        description: `Sent $${value.toFixed(2)} USDC to ${(log.args.to as string).slice(0, 6)}...${(log.args.to as string).slice(-4)}`,
-                        blockNumber: ev.blockNumber,
-                        asset: 'usdc',
-                    });
-                }
-            } catch (e) {
-                console.error('Error fetching USDC Transfer Out events:', e);
-            }
+            // NOTE: Removed USDC Transfer queries — they query too wide a range,
+            // hit the 100-block limit repeatedly, and cause rate-limit errors.
+            // Vault events (Deposit/Withdraw/Claim) are sufficient for history.
 
             txList.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
             setTransactions(txList);
@@ -213,9 +190,7 @@ export function useTransactionHistory(walletAddress: string | undefined) {
     const filterTransactions = useCallback((filters: TransactionFilters): Transaction[] => {
         return transactions.filter(tx => {
             if (filters.type && filters.type !== 'all') {
-                if (filters.type === 'transfer') {
-                    if (tx.type !== 'transfer_in' && tx.type !== 'transfer_out') return false;
-                } else if (tx.type !== filters.type) return false;
+                if (tx.type !== filters.type) return false;
             }
             if (filters.startDate && tx.timestamp < filters.startDate) return false;
             if (filters.endDate && tx.timestamp > filters.endDate) return false;

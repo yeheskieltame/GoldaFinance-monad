@@ -17,7 +17,7 @@ import {
     approveUSDC,
     WithdrawalView,
 } from '@/lib/services/contractService';
-import { MONAD_TESTNET } from '@/lib/types';
+import { MONAD_MAINNET } from '@/lib/types';
 
 // ============================================
 // Types
@@ -115,8 +115,8 @@ export function useGoldaVault() {
                             method: 'wallet_addEthereumChain',
                             params: [{
                                 chainId: chainIdHex,
-                                chainName: MONAD_TESTNET.name,
-                                nativeCurrency: MONAD_TESTNET.nativeCurrency,
+                                chainName: MONAD_MAINNET.name,
+                                nativeCurrency: MONAD_MAINNET.nativeCurrency,
                                 rpcUrls: [RPC_URL],
                                 blockExplorerUrls: [EXPLORER_URL],
                             }],

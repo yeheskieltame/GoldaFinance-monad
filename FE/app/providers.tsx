@@ -1,25 +1,25 @@
 'use client';
 
 import { PrivyProvider } from '@privy-io/react-auth';
-import { MONAD_TESTNET } from '@/lib/types';
+import { MONAD_MAINNET } from '@/lib/types';
 import React from 'react';
 
-const monadTestnet = {
-  id: MONAD_TESTNET.chainId,
-  name: MONAD_TESTNET.name,
-  network: 'monad-testnet',
-  nativeCurrency: MONAD_TESTNET.nativeCurrency,
+const monadMainnet = {
+  id: MONAD_MAINNET.chainId,
+  name: MONAD_MAINNET.name,
+  network: 'monad',
+  nativeCurrency: MONAD_MAINNET.nativeCurrency,
   rpcUrls: {
-    default: { http: [MONAD_TESTNET.rpcUrl] },
-    public: { http: [MONAD_TESTNET.rpcUrl] },
+    default: { http: [MONAD_MAINNET.rpcUrl] },
+    public: { http: [MONAD_MAINNET.rpcUrl] },
   },
   blockExplorers: {
     default: {
-      name: 'MonadScan Testnet',
-      url: MONAD_TESTNET.explorerUrl,
+      name: 'MonadScan',
+      url: MONAD_MAINNET.explorerUrl,
     },
   },
-  testnet: true,
+  testnet: false,
 };
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -70,8 +70,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
           showWalletLoginFirst: false,
         },
 
-        defaultChain: monadTestnet,
-        supportedChains: [monadTestnet],
+        defaultChain: monadMainnet,
+        supportedChains: [monadMainnet],
 
         embeddedWallets: {
           ethereum: {

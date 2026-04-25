@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpRight, Plus, Send, QrCode } from 'lucide-react';
+import { ArrowUpRight, Plus, Send, ArrowDownUp, ArrowLeftRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface QuickAction {
@@ -40,12 +40,20 @@ export function QuickActions({ onDeposit, onWithdraw, onSend }: QuickActionsProp
             onClick: onSend || (() => router.push('/dashboard/pay?mode=send')),
         },
         {
-            id: 'scan',
-            label: 'Scan',
-            icon: QrCode,
+            id: 'swap',
+            label: 'Swap',
+            icon: ArrowDownUp,
+            color: '#3B82F6',
+            bgColor: 'rgba(59, 130, 246, 0.1)',
+            path: '/dashboard/swap',
+        },
+        {
+            id: 'bridge',
+            label: 'Bridge',
+            icon: ArrowLeftRight,
             color: '#8B5CF6',
             bgColor: 'rgba(139, 92, 246, 0.1)',
-            path: '/dashboard/pay',
+            path: '/dashboard/bridge',
         },
         {
             id: 'withdraw',

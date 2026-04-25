@@ -168,11 +168,11 @@ export default function DashboardPage() {
         switch (type) {
             case 'deposit':
             case 'claim':
-            case 'transfer_in':
                 return <ArrowDownLeft className="w-5 h-5 text-green-500" />;
             case 'withdraw_request':
-            case 'transfer_out':
                 return <ArrowUpRight className="w-5 h-5 text-orange-500" />;
+            case 'swap':
+                return <Sparkles className="w-5 h-5 text-blue-500" />;
             default:
                 return <Sparkles className="w-5 h-5 text-amber-500" />;
         }
@@ -182,11 +182,11 @@ export default function DashboardPage() {
         switch (type) {
             case 'deposit':
             case 'claim':
-            case 'transfer_in':
                 return 'bg-green-100 dark:bg-green-500/20';
             case 'withdraw_request':
-            case 'transfer_out':
                 return 'bg-orange-100 dark:bg-orange-500/20';
+            case 'swap':
+                return 'bg-blue-100 dark:bg-blue-500/20';
             default:
                 return 'bg-amber-100 dark:bg-amber-500/20';
         }
@@ -457,7 +457,7 @@ export default function DashboardPage() {
                                         </div>
                                         <div className="text-right">
                                             <p className={`font-semibold ${
-                                                tx.type === 'deposit' || tx.type === 'claim' || tx.type === 'transfer_in'
+                                                tx.type === 'deposit' || tx.type === 'claim'
                                                     ? 'text-green-500'
                                                     : 'text-foreground'
                                             }`}>

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
-type FilterType = 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'transfer';
+type FilterType = 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'swap';
 
 export default function HistoryPage() {
     const router = useRouter();
@@ -39,9 +39,7 @@ export default function HistoryPage() {
     const filteredTransactions = useMemo(() => {
         return transactions.filter(tx => {
             if (filter !== 'all') {
-                if (filter === 'transfer') {
-                    if (tx.type !== 'transfer_in' && tx.type !== 'transfer_out') return false;
-                } else if (tx.type !== filter) return false;
+                if (tx.type !== filter) return false;
             }
             if (searchQuery) {
                 const s = searchQuery.toLowerCase();
@@ -76,12 +74,11 @@ export default function HistoryPage() {
         switch (type) {
             case 'deposit':
             case 'claim':
-            case 'transfer_in':
                 return <ArrowDownLeft className="w-5 h-5 text-green-500" />;
             case 'withdraw_request':
                 return <Hourglass className="w-5 h-5 text-amber-500" />;
-            case 'transfer_out':
-                return <ArrowUpRight className="w-5 h-5 text-orange-500" />;
+            case 'swap':
+                return <Sparkles className="w-5 h-5 text-blue-500" />;
             default:
                 return <Sparkles className="w-5 h-5 text-amber-500" />;
         }
@@ -91,19 +88,18 @@ export default function HistoryPage() {
         switch (type) {
             case 'deposit':
             case 'claim':
-            case 'transfer_in':
                 return 'bg-green-100 dark:bg-green-500/20';
             case 'withdraw_request':
                 return 'bg-amber-100 dark:bg-amber-500/20';
-            case 'transfer_out':
-                return 'bg-orange-100 dark:bg-orange-500/20';
+            case 'swap':
+                return 'bg-blue-100 dark:bg-blue-500/20';
             default:
                 return 'bg-amber-100 dark:bg-amber-500/20';
         }
     };
 
     const amountDisplay = (tx: Transaction) => {
-        const isInflow = tx.type === 'deposit' || tx.type === 'claim' || tx.type === 'transfer_in';
+        const isInflow = tx.type === 'deposit' || tx.type === 'claim';
         const sign = isInflow ? '+' : '-';
         const primary = `${sign}$${tx.amount.toFixed(2)} USDC`;
         let secondary = '';
@@ -113,8 +109,8 @@ export default function HistoryPage() {
             secondary = tx.shares ? `-${tx.shares.toFixed(4)} gUSDC` : 'Queued';
         } else if (tx.type === 'claim') {
             secondary = `Claim #${tx.withdrawalId ?? ''}`;
-        } else if (tx.type === 'transfer_in') {
-            secondary = 'Received';
+        } else if (tx.type === 'swap') {
+            secondary = 'Auto-Swap';
         } else {
             secondary = 'Sent';
         }
@@ -159,7 +155,7 @@ export default function HistoryPage() {
                         { id: 'deposit', label: 'Deposits' },
                         { id: 'withdraw_request', label: 'Withdraws' },
                         { id: 'claim', label: 'Claims' },
-                        { id: 'transfer', label: 'Transfers' },
+                        { id: 'swap', label: 'Swaps' },
                     ].map((f) => (
                         <button
                             key={f.id}

@@ -24,7 +24,7 @@ export async function GET(
         amount: tx.amount,
         goldReceived: tx.goldReceived,
         txHash: tx.txHash,
-        aiAnalysis: tx.aiAnalysis,
+        aiAnalysis: (tx as unknown as Record<string, unknown>).aiAnalysis ?? null,
         timestamp: tx.createdAt,
       })),
     });

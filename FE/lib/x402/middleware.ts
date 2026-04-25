@@ -58,7 +58,7 @@ export async function validateX402Payment(
     // Execute payment on-chain (optional - can be done async)
     try {
         const provider = new ethers.JsonRpcProvider(
-            process.env.NEXT_PUBLIC_RPC_URL || 'https://testnet-rpc.monad.xyz'
+            process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.monad.xyz'
         );
 
         // Check if nonce already used
