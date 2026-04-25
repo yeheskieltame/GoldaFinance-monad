@@ -1,5 +1,5 @@
 // ============================================
-// Golda Finance — Smart Contract Types
+// Golda Finance — Monad Mainnet Types
 // ============================================
 
 export interface ContractAddresses {
@@ -14,6 +14,8 @@ export interface VaultBalances {
   navUSDC: number;
   shareValueUSDC: number;
   usdcAllowance: number;
+  xaut: number;
+  wbtc: number;
 }
 
 export interface TransactionResult {
@@ -44,9 +46,9 @@ export interface WithdrawClaimedEvent {
 
 // Savings asset preference. The contract is asset-agnostic; the operator
 // routes USDC -> the selected asset via LiFi off-chain.
-export type SavingsAssetId = "XAUT" | "PAXG" | "WBTC";
+export type SavingsAssetId = "XAUT" | "WBTC";
 
-// Network
+// Network — Monad Mainnet ONLY
 export interface NetworkConfig {
   chainId: number;
   name: string;
@@ -59,18 +61,6 @@ export interface NetworkConfig {
   };
 }
 
-export const MONAD_TESTNET: NetworkConfig = {
-  chainId: 10143,
-  name: "Monad Testnet",
-  rpcUrl: "https://testnet-rpc.monad.xyz",
-  explorerUrl: "https://testnet.monadscan.com",
-  nativeCurrency: {
-    name: "MON",
-    symbol: "MON",
-    decimals: 18,
-  },
-};
-
 export const MONAD_MAINNET: NetworkConfig = {
   chainId: 143,
   name: "Monad",
@@ -82,7 +72,3 @@ export const MONAD_MAINNET: NetworkConfig = {
     decimals: 18,
   },
 };
-
-// Keep the legacy name exported so we don't need to touch a bunch of callers
-// that imported the old constant. Point it at Monad testnet.
-export const MANTLE_SEPOLIA: NetworkConfig = MONAD_TESTNET;

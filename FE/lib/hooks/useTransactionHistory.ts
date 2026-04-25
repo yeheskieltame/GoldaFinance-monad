@@ -1,31 +1,61 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ethers } from 'ethers';
 import {
-    CONTRACT_ADDRESSES,
-    CONTRACT_ABIS,
-    RPC_URL,
-} from '@/lib/services/contractService';
+    getSwapHistory,
+    addSwapRecord,
+    type SwapRecord,
+} from '@/lib/services/swapHistory';
 
 export interface Transaction {
     id: string;
-    type: 'deposit' | 'withdraw_request' | 'claim' | 'transfer_in' | 'transfer_out';
-    amount: number; // USDC
+    type: 'deposit' | 'withdraw_request' | 'claim' | 'swap';
+    amount: number;
     shares?: number;
     withdrawalId?: number;
     timestamp: Date;
     txHash: string;
-    status: 'completed';
+    status: 'completed' | 'pending' | 'failed';
     description: string;
     blockNumber: number;
-    asset: 'usdc' | 'shares';
+    asset: 'usdc' | 'shares' | 'swap';
+    swapToSymbol?: string;
+    swapToAmount?: number;
 }
 
 export interface TransactionFilters {
-    type?: 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'transfer';
+    type?: 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'swap';
     startDate?: Date;
     endDate?: Date;
+}
+
+function buildDescription(tx: { type: string; amount: number; withdrawalId?: number }): string {
+    switch (tx.type) {
+        case 'deposit':
+            return `Deposited $${tx.amount.toFixed(2)} USDC`;
+        case 'withdraw_request':
+            return `Requested withdraw of $${tx.amount.toFixed(2)} USDC`;
+        case 'claim':
+            return `Claimed $${tx.amount.toFixed(2)} USDC`;
+        default:
+            return `Transaction $${tx.amount.toFixed(2)}`;
+    }
+}
+
+function swapRecordToTransaction(swap: SwapRecord): Transaction {
+    return {
+        id: `swap-${swap.txHash}`,
+        type: 'swap',
+        amount: swap.fromAmountHuman,
+        timestamp: new Date(swap.timestamp),
+        txHash: swap.txHash,
+        status: swap.status,
+        description: `Swapped ${swap.fromAmountHuman.toFixed(2)} ${swap.fromTokenSymbol} → ${swap.toAmountHuman.toFixed(6)} ${swap.toTokenSymbol}`,
+        blockNumber: 0,
+        asset: 'swap',
+        swapToSymbol: swap.toTokenSymbol,
+        swapToAmount: swap.toAmountHuman,
+    };
 }
 
 export function useTransactionHistory(walletAddress: string | undefined) {
@@ -40,160 +70,35 @@ export function useTransactionHistory(walletAddress: string | undefined) {
         setError(null);
 
         try {
-            const provider = new ethers.JsonRpcProvider(RPC_URL);
-            const vault = new ethers.Contract(
-                CONTRACT_ADDRESSES.GOLDA_VAULT,
-                CONTRACT_ABIS.GOLDA_VAULT,
-                provider
-            );
-            const usdc = new ethers.Contract(
-                CONTRACT_ADDRESSES.USDC,
-                CONTRACT_ABIS.USDC,
-                provider
-            );
+            // Server-side API handles chunked RPC queries — no client-side loop
+            const res = await fetch(`/api/transactions/${walletAddress}`);
+            if (!res.ok) throw new Error(`API error ${res.status}`);
+            const data = await res.json();
 
             const txList: Transaction[] = [];
-            const currentBlock = await provider.getBlockNumber();
-            const fromBlock = Math.max(0, currentBlock - 100_000);
 
-            const usdcDec = Number(await usdc.decimals().catch(() => 6));
-
-            // Deposit(user, usdcIn, sharesOut)
-            try {
-                const filter = vault.filters.Deposit(walletAddress);
-                const events = await vault.queryFilter(filter, fromBlock, currentBlock);
-                for (const ev of events) {
-                    const log = ev as ethers.EventLog;
-                    if (!log.args) continue;
-                    const block = await ev.getBlock();
-                    const usdcIn = Number(ethers.formatUnits(log.args.usdcIn ?? 0, usdcDec));
-                    const shares = Number(ethers.formatUnits(log.args.sharesOut ?? 0, 6));
+            if (data.success && Array.isArray(data.transactions)) {
+                for (const tx of data.transactions) {
                     txList.push({
-                        id: `deposit-${ev.transactionHash}`,
-                        type: 'deposit',
-                        amount: usdcIn,
-                        shares,
-                        timestamp: new Date(block.timestamp * 1000),
-                        txHash: ev.transactionHash,
+                        id: tx.id,
+                        type: tx.type,
+                        amount: tx.amount,
+                        shares: tx.shares,
+                        withdrawalId: tx.withdrawalId,
+                        timestamp: new Date(tx.timestamp),
+                        txHash: tx.txHash,
                         status: 'completed',
-                        description: `Deposited $${usdcIn.toFixed(2)} USDC`,
-                        blockNumber: ev.blockNumber,
-                        asset: 'usdc',
+                        description: buildDescription(tx),
+                        blockNumber: tx.blockNumber,
+                        asset: tx.type === 'deposit' || tx.type === 'claim' ? 'usdc' : 'shares',
                     });
                 }
-            } catch (e) {
-                console.error('Error fetching Deposit events:', e);
             }
 
-            // WithdrawRequested(user, id, shares, usdcOwed)
-            try {
-                const filter = vault.filters.WithdrawRequested(walletAddress);
-                const events = await vault.queryFilter(filter, fromBlock, currentBlock);
-                for (const ev of events) {
-                    const log = ev as ethers.EventLog;
-                    if (!log.args) continue;
-                    const block = await ev.getBlock();
-                    const shares = Number(ethers.formatUnits(log.args.shares ?? 0, 6));
-                    const owed = Number(ethers.formatUnits(log.args.usdcOwed ?? 0, usdcDec));
-                    const id = Number(log.args.id ?? 0);
-                    txList.push({
-                        id: `wreq-${ev.transactionHash}`,
-                        type: 'withdraw_request',
-                        amount: owed,
-                        shares,
-                        withdrawalId: id,
-                        timestamp: new Date(block.timestamp * 1000),
-                        txHash: ev.transactionHash,
-                        status: 'completed',
-                        description: `Requested withdraw of $${owed.toFixed(2)} USDC`,
-                        blockNumber: ev.blockNumber,
-                        asset: 'shares',
-                    });
-                }
-            } catch (e) {
-                console.error('Error fetching WithdrawRequested events:', e);
-            }
-
-            // WithdrawClaimed(id, user, usdc)
-            try {
-                const filter = vault.filters.WithdrawClaimed(null, walletAddress);
-                const events = await vault.queryFilter(filter, fromBlock, currentBlock);
-                for (const ev of events) {
-                    const log = ev as ethers.EventLog;
-                    if (!log.args) continue;
-                    const block = await ev.getBlock();
-                    const paid = Number(ethers.formatUnits(log.args.usdc ?? 0, usdcDec));
-                    const id = Number(log.args.id ?? 0);
-                    txList.push({
-                        id: `claim-${ev.transactionHash}`,
-                        type: 'claim',
-                        amount: paid,
-                        withdrawalId: id,
-                        timestamp: new Date(block.timestamp * 1000),
-                        txHash: ev.transactionHash,
-                        status: 'completed',
-                        description: `Claimed $${paid.toFixed(2)} USDC`,
-                        blockNumber: ev.blockNumber,
-                        asset: 'usdc',
-                    });
-                }
-            } catch (e) {
-                console.error('Error fetching WithdrawClaimed events:', e);
-            }
-
-            // USDC Transfers (external — filter out vault interactions already covered)
-            const vaultAddr = CONTRACT_ADDRESSES.GOLDA_VAULT.toLowerCase();
-
-            try {
-                const filter = usdc.filters.Transfer(null, walletAddress);
-                const events = await usdc.queryFilter(filter, fromBlock, currentBlock);
-                for (const ev of events) {
-                    const log = ev as ethers.EventLog;
-                    if (!log.args) continue;
-                    const from = (log.args.from as string).toLowerCase();
-                    if (from === vaultAddr || from === ethers.ZeroAddress.toLowerCase()) continue;
-                    const block = await ev.getBlock();
-                    const value = Number(ethers.formatUnits(log.args.value ?? 0, usdcDec));
-                    txList.push({
-                        id: `usdc-in-${ev.transactionHash}`,
-                        type: 'transfer_in',
-                        amount: value,
-                        timestamp: new Date(block.timestamp * 1000),
-                        txHash: ev.transactionHash,
-                        status: 'completed',
-                        description: `Received $${value.toFixed(2)} USDC from ${(log.args.from as string).slice(0, 6)}...${(log.args.from as string).slice(-4)}`,
-                        blockNumber: ev.blockNumber,
-                        asset: 'usdc',
-                    });
-                }
-            } catch (e) {
-                console.error('Error fetching USDC Transfer In events:', e);
-            }
-
-            try {
-                const filter = usdc.filters.Transfer(walletAddress, null);
-                const events = await usdc.queryFilter(filter, fromBlock, currentBlock);
-                for (const ev of events) {
-                    const log = ev as ethers.EventLog;
-                    if (!log.args) continue;
-                    const to = (log.args.to as string).toLowerCase();
-                    if (to === vaultAddr || to === ethers.ZeroAddress.toLowerCase()) continue;
-                    const block = await ev.getBlock();
-                    const value = Number(ethers.formatUnits(log.args.value ?? 0, usdcDec));
-                    txList.push({
-                        id: `usdc-out-${ev.transactionHash}`,
-                        type: 'transfer_out',
-                        amount: value,
-                        timestamp: new Date(block.timestamp * 1000),
-                        txHash: ev.transactionHash,
-                        status: 'completed',
-                        description: `Sent $${value.toFixed(2)} USDC to ${(log.args.to as string).slice(0, 6)}...${(log.args.to as string).slice(-4)}`,
-                        blockNumber: ev.blockNumber,
-                        asset: 'usdc',
-                    });
-                }
-            } catch (e) {
-                console.error('Error fetching USDC Transfer Out events:', e);
+            // Merge local LiFi swap history (stored in localStorage, not on-chain)
+            const swapHistory = getSwapHistory();
+            for (const swap of swapHistory) {
+                txList.push(swapRecordToTransaction(swap));
             }
 
             txList.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
@@ -213,9 +118,7 @@ export function useTransactionHistory(walletAddress: string | undefined) {
     const filterTransactions = useCallback((filters: TransactionFilters): Transaction[] => {
         return transactions.filter(tx => {
             if (filters.type && filters.type !== 'all') {
-                if (filters.type === 'transfer') {
-                    if (tx.type !== 'transfer_in' && tx.type !== 'transfer_out') return false;
-                } else if (tx.type !== filters.type) return false;
+                if (tx.type !== filters.type) return false;
             }
             if (filters.startDate && tx.timestamp < filters.startDate) return false;
             if (filters.endDate && tx.timestamp > filters.endDate) return false;
@@ -229,6 +132,7 @@ export function useTransactionHistory(walletAddress: string | undefined) {
         error,
         refetch: fetchTransactions,
         filterTransactions,
+        addSwapRecord,
     };
 }
 

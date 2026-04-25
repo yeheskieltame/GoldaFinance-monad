@@ -14,13 +14,13 @@
  */
 
 export const X402_CONFIG = {
-    // USDC contract on Monad Testnet
+    // USDC contract on Monad Mainnet
     paymentToken: {
         address: process.env.NEXT_PUBLIC_USDC_ADDRESS || '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
         symbol: 'USDC',
         decimals: 6,
-        network: 'monad-testnet',
-        chainId: 10143,
+        network: 'monad',
+        chainId: 143,
     },
 
     // Recipient address for x402 payments (AI service provider)

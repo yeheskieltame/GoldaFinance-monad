@@ -1,504 +1,713 @@
 'use client';
 
-import { useState, useRef, useEffect, Suspense, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { ethers } from 'ethers';
 import { MobileLayout } from '@/components/mobile-layout';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useGoldaVault } from '@/lib/hooks/useAureoContract';
-import { CONTRACT_ADDRESSES, CONTRACT_ABIS, EXPLORER_URL } from '@/lib/services/contractService';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+    getMonadSwapQuote,
+    executeMonadSwap,
+    MONAD_TOKENS,
+    MONAD_CHAIN_ID,
+} from '@/lib/services/lifiService';
+import { addSwapRecord } from '@/lib/services/swapHistory';
+import { getUserBalances } from '@/lib/services/contractService';
+import { EXPLORER_URL, CHAIN_ID, RPC_URL } from '@/lib/services/contractService';
+import { MONAD_MAINNET } from '@/lib/types';
+import {
+    DEFI_PROTOCOLS,
+    depositToProtocol,
+    type DeFiProtocol,
+} from '@/lib/services/defiProtocolService';
 import {
     ArrowLeft,
-    QrCode,
-    Send,
-    Camera,
-    X,
-    Wallet,
-    Copy,
-    Check,
+    Zap,
+    Brain,
+    CheckCircle2,
     AlertCircle,
     Loader2,
-    ChevronRight,
     ExternalLink,
-    DollarSign,
+    ChevronRight,
+    Sparkles,
+    TrendingUp,
+    ArrowRight,
+    Coins,
 } from 'lucide-react';
-import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 
-type PayMode = 'scan' | 'send';
+// ─── AI analysis ─────────────────────────────────────────────────────────────
 
-interface RecentRecipient {
-    address: string;
-    name?: string;
-    lastUsed: Date;
+interface DeFiRecommendation {
+    protocolId: string;
+    reason: string;
+    confidence: number;
+    action: 'ENTER' | 'WAIT';
 }
 
-function PayPageContent() {
+async function analyzeDeFi(usdcBalance: number, xautBalance: number, wbtcBalance: number): Promise<DeFiRecommendation> {
+    const genAI = new GoogleGenerativeAI(
+        process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
+    );
+    const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
+    });
+
+    const prompt = `You are a DeFi yield advisor. User balances on Monad mainnet:
+- USDC: $${usdcBalance.toFixed(2)}
+- XAUt0 (tokenised gold): ${xautBalance.toFixed(6)}
+- WBTC: ${wbtcBalance.toFixed(8)}
+
+Available DeFi protocols:
+${DEFI_PROTOCOLS.map(p => `- ${p.name} (id: ${p.id}): APY ${p.apy}%, risk: ${p.risk}, deposit: ${p.depositAsset}, TVL: ${p.tvl}`).join('\n')}
+
+Flow: user swaps USDC → target asset (XAUt0 or WBTC) via LiFi if needed, then deposits into the protocol vault.
+If user already holds the target asset, they skip the swap.
+
+Analyse risk-adjusted yield and recommend ONE protocol. Respond ONLY in valid JSON (no markdown):
+{
+  "protocolId": "<one of: kuru-xaut|neverland-xaut|ambient-wbtc|morpho-wbtc>",
+  "reason": "<1-2 sentence explanation>",
+  "confidence": <50-95>,
+  "action": "ENTER" or "WAIT"
+}`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON in AI response');
+    const rec = JSON.parse(match[0]) as DeFiRecommendation;
+    return {
+        protocolId: DEFI_PROTOCOLS.find(p => p.id === rec.protocolId) ? rec.protocolId : DEFI_PROTOCOLS[0].id,
+        reason: rec.reason ?? '',
+        confidence: Math.min(95, Math.max(50, rec.confidence ?? 70)),
+        action: rec.action === 'WAIT' ? 'WAIT' : 'ENTER',
+    };
+}
+
+// ─── Style maps ──────────────────────────────────────────────────────────────
+
+const RISK_STYLE = {
+    low:    { cls: 'bg-info-soft text-[var(--info)]',       label: 'Low Risk' },
+    medium: { cls: 'bg-warning-soft text-[var(--warning)]', label: 'Med Risk' },
+    high:   { cls: 'bg-destructive/10 text-destructive',    label: 'High Risk' },
+};
+
+// ─── Per-protocol execution state ────────────────────────────────────────────
+
+interface ExecState {
+    phase: 'idle' | 'swapping' | 'depositing' | 'done' | 'error';
+    step1Hash: string | null;
+    step2Hash: string | null;
+    error: string | null;
+}
+
+const IDLE_STATE: ExecState = { phase: 'idle', step1Hash: null, step2Hash: null, error: null };
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+
+export default function DeFiPage() {
     const router = useRouter();
-    const searchParams = useSearchParams();
-    const { user, ready, authenticated } = usePrivy();
+    const { ready, authenticated, user } = usePrivy();
     const { wallets } = useWallets();
-    const { balances, fetchBalances } = useGoldaVault();
 
-    const [mode, setMode] = useState<PayMode>((searchParams.get('mode') as PayMode) || 'send');
-    const [amount, setAmount] = useState('');
-    const [recipientAddress, setRecipientAddress] = useState('');
-    const [isScanning, setIsScanning] = useState(false);
-    const [isSending, setIsSending] = useState(false);
-    const [copied, setCopied] = useState(false);
-    const [error, setError] = useState('');
-    const [txHash, setTxHash] = useState<string | null>(null);
-    const [recentRecipients, setRecentRecipients] = useState<RecentRecipient[]>([]);
-    const [scanSuccess, setScanSuccess] = useState(false);
+    const [usdcBalance, setUsdcBalance] = useState(0);
+    const [xautBalance, setXautBalance] = useState(0);
+    const [wbtcBalance, setWbtcBalance] = useState(0);
 
-    const streamRef = useRef<MediaStream | null>(null);
-    const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+    const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [amount, setAmount]         = useState('');
+    const [useOwnToken, setUseOwnToken] = useState(false); // skip swap if user has token
 
-    useEffect(() => {
-        const saved = localStorage.getItem('golda_recent_recipients');
-        if (saved) {
-            try {
-                setRecentRecipients(JSON.parse(saved));
-            } catch { /* ignore */ }
-        }
-    }, []);
+    const [quote, setQuote]           = useState<Awaited<ReturnType<typeof getMonadSwapQuote>>>(null);
+    const [quoteLoading, setQuoteLoading] = useState(false);
 
+    const [execState, setExecState]   = useState<ExecState>(IDLE_STATE);
+
+    const [analyzing, setAnalyzing]   = useState(false);
+    const [recommendation, setRecommendation] = useState<DeFiRecommendation | null>(null);
+    const [autoRunning, setAutoRunning] = useState(false);
+
+    const walletAddress = user?.wallet?.address;
+    const activeWallet  = wallets.find(w => w.walletClientType === 'privy') || wallets[0];
+    const selected      = DEFI_PROTOCOLS.find(p => p.id === selectedId) ?? null;
+    const parsedAmount  = parseFloat(amount) || 0;
+
+    const tokenBalance = (proto: DeFiProtocol) =>
+        proto.depositAsset === 'XAUt0' ? xautBalance : wbtcBalance;
+
+    // Redirect if not authed
     useEffect(() => {
         if (ready && !authenticated) router.push('/');
     }, [ready, authenticated, router]);
 
+    // Load balances
+    const refreshBalances = useCallback(() => {
+        if (!walletAddress) return;
+        getUserBalances(walletAddress).then(b => {
+            setUsdcBalance(b.usdc);
+            setXautBalance(b.xaut);
+            setWbtcBalance(b.wbtc);
+        }).catch(() => {});
+    }, [walletAddress]);
+
+    useEffect(() => { refreshBalances(); }, [refreshBalances]);
+
+    // When protocol changes, decide whether to default to "own token" mode
     useEffect(() => {
-        return () => {
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(t => t.stop());
-            }
-        };
-    }, []);
+        if (!selected) return;
+        const bal = tokenBalance(selected);
+        setUseOwnToken(bal > 0.000001);
+        setAmount('');
+        setQuote(null);
+        setExecState(IDLE_STATE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedId]);
 
-    const extractEvmAddress = useCallback((text: string): string | null => {
-        const direct = text.match(/^(0x[a-fA-F0-9]{40})$/);
-        if (direct) return direct[1];
-        const eth = text.match(/ethereum:(0x[a-fA-F0-9]{40})/i);
-        if (eth) return eth[1];
-        const anyAddr = text.match(/0x[a-fA-F0-9]{40}/);
-        if (anyAddr) return anyAddr[0];
-        return null;
-    }, []);
-
-    const onScanSuccess = useCallback((decodedText: string) => {
-        const address = extractEvmAddress(decodedText);
-        if (address && ethers.isAddress(address)) {
-            setRecipientAddress(address);
-            setScanSuccess(true);
-            setError('');
-            if (scannerRef.current) {
-                scannerRef.current.clear().catch(console.error);
-                scannerRef.current = null;
-            }
-            setIsScanning(false);
-            setMode('send');
-            setTimeout(() => setScanSuccess(false), 2000);
-        } else {
-            setError('Invalid wallet address in QR code');
+    // LiFi quote (only when swapping USDC → target)
+    useEffect(() => {
+        if (!selected || useOwnToken || parsedAmount <= 0 || !walletAddress) {
+            setQuote(null);
+            return;
         }
-    }, [extractEvmAddress]);
+        let cancelled = false;
+        setQuoteLoading(true);
 
-    const startScanning = useCallback(async () => {
-        setIsScanning(true);
-        setError('');
-        setScanSuccess(false);
-
-        setTimeout(() => {
+        const handle = setTimeout(async () => {
             try {
-                const scanner = new Html5QrcodeScanner(
-                    'qr-reader',
-                    {
-                        fps: 10,
-                        qrbox: { width: 250, height: 250 },
-                        aspectRatio: 1,
-                        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-                        rememberLastUsedCamera: true,
-                    },
-                    false
-                );
-                scanner.render(
-                    (decodedText) => onScanSuccess(decodedText),
-                    () => { /* ignore scan errors */ }
-                );
-                scannerRef.current = scanner;
-            } catch (err) {
-                console.error('Failed to start scanner:', err);
-                setError('Unable to start camera. Please grant camera permissions.');
-                setIsScanning(false);
+                const fromAmount = ethers.parseUnits(parsedAmount.toFixed(6), 6).toString();
+                const q = await getMonadSwapQuote({
+                    fromToken: MONAD_TOKENS.USDC.address,
+                    toToken:   selected.depositToken.address,
+                    fromAmount,
+                    fromAddress: walletAddress,
+                });
+                if (!cancelled) { setQuote(q); setQuoteLoading(false); }
+            } catch {
+                if (!cancelled) { setQuote(null); setQuoteLoading(false); }
             }
-        }, 100);
-    }, [onScanSuccess]);
+        }, 600);
 
-    const stopScanning = useCallback(() => {
-        if (scannerRef.current) {
-            scannerRef.current.clear().catch(console.error);
-            scannerRef.current = null;
-        }
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(t => t.stop());
-            streamRef.current = null;
-        }
-        setIsScanning(false);
-    }, []);
+        return () => { cancelled = true; clearTimeout(handle); setQuoteLoading(false); };
+    }, [selected, useOwnToken, parsedAmount, walletAddress]);
 
-    const saveRecentRecipient = (address: string) => {
-        const existing = recentRecipients.filter(r => r.address.toLowerCase() !== address.toLowerCase());
-        const updated: RecentRecipient[] = [
-            { address, lastUsed: new Date() },
-            ...existing.slice(0, 4),
-        ];
-        setRecentRecipients(updated);
-        localStorage.setItem('golda_recent_recipients', JSON.stringify(updated));
-    };
-
-    const handleSend = async () => {
-        if (!recipientAddress || !amount) {
-            setError('Please enter recipient address and amount');
-            return;
-        }
-        if (!ethers.isAddress(recipientAddress)) {
-            setError('Invalid EVM wallet address');
-            return;
-        }
-        const numAmount = parseFloat(amount);
-        if (isNaN(numAmount) || numAmount <= 0) {
-            setError('Please enter a valid amount');
-            return;
-        }
-        if (numAmount > balances.usdc) {
-            setError(`Insufficient balance. You have $${balances.usdc.toFixed(2)} USDC`);
-            return;
-        }
-        if (recipientAddress.toLowerCase() === user?.wallet?.address?.toLowerCase()) {
-            setError('Cannot send to your own address');
-            return;
-        }
-
-        setIsSending(true);
-        setError('');
-        setTxHash(null);
-
+    // Signer with chain switch
+    const getSigner = useCallback(async (): Promise<ethers.Signer> => {
+        if (!activeWallet) throw new Error('No wallet connected');
+        const provider = await activeWallet.getEthereumProvider();
+        const chainIdHex = `0x${CHAIN_ID.toString(16)}`;
         try {
-            const activeWallet = wallets.find(w => w.walletClientType === 'privy') || wallets[0];
-            if (!activeWallet) throw new Error('No wallet connected');
+            const cur = await provider.request({ method: 'eth_chainId' });
+            if (cur !== chainIdHex) {
+                await provider.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: chainIdHex }],
+                }).catch(async (e: { code?: number }) => {
+                    if (e?.code === 4902) {
+                        await provider.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: chainIdHex,
+                                chainName: MONAD_MAINNET.name,
+                                nativeCurrency: MONAD_MAINNET.nativeCurrency,
+                                rpcUrls: [RPC_URL],
+                                blockExplorerUrls: [EXPLORER_URL],
+                            }],
+                        });
+                    }
+                });
+            }
+        } catch { /* ignore */ }
+        return new ethers.BrowserProvider(provider).getSigner();
+    }, [activeWallet]);
 
-            const provider = await activeWallet.getEthereumProvider();
-            const ethersProvider = new ethers.BrowserProvider(provider);
-            const signer = await ethersProvider.getSigner();
+    // ── Main execution: swap (optional) + deposit ──────────────────────────
+    const handleStakeAndDeposit = useCallback(async (proto: DeFiProtocol) => {
+        if (parsedAmount <= 0) return;
+        setExecState(IDLE_STATE);
 
-            const usdc = new ethers.Contract(CONTRACT_ADDRESSES.USDC, CONTRACT_ABIS.USDC, signer);
-            const decimals = Number(await usdc.decimals().catch(() => 6));
-            const amountInWei = ethers.parseUnits(numAmount.toString(), decimals);
+        const signer = await getSigner();
+        const owner  = walletAddress!;
 
-            const tx = await usdc.transfer(recipientAddress, amountInWei);
-            const receipt = await tx.wait();
+        let acquiredAmount: bigint;
+        let step1Hash: string | null = null;
 
-            setTxHash(receipt.hash);
-            saveRecentRecipient(recipientAddress);
-            await fetchBalances();
+        if (!useOwnToken) {
+            // ── Step 1: Swap USDC → target asset via LiFi ─────────────────
+            setExecState(s => ({ ...s, phase: 'swapping' }));
 
-            router.push(`/dashboard/pay/success?amount=${amount}&to=${recipientAddress}&tx=${receipt.hash}`);
-        } catch (err: unknown) {
-            console.error('Transfer error:', err);
-            const msg = err instanceof Error ? err.message : 'Transaction failed';
-            if (msg.includes('user rejected')) setError('Transaction was rejected');
-            else if (msg.includes('insufficient')) setError('Insufficient balance for transaction');
-            else setError('Transaction failed. Please try again.');
+            const fromAmountRaw = ethers.parseUnits(parsedAmount.toFixed(6), 6).toString();
+            const q = quote ?? await getMonadSwapQuote({
+                fromToken:   MONAD_TOKENS.USDC.address,
+                toToken:     proto.depositToken.address,
+                fromAmount:  fromAmountRaw,
+                fromAddress: owner,
+            });
+            if (!q) throw new Error('No LiFi quote available');
+
+            const swapResult = await executeMonadSwap(signer, q);
+            step1Hash = swapResult.txHash;
+
+            addSwapRecord({
+                id:              `defi-swap-${Date.now()}`,
+                fromToken:       MONAD_TOKENS.USDC.address,
+                fromTokenSymbol: 'USDC',
+                toToken:         proto.depositToken.address,
+                toTokenSymbol:   proto.depositToken.symbol,
+                fromAmount:      fromAmountRaw,
+                fromAmountHuman: parsedAmount,
+                toAmount:        q.toAmount,
+                toAmountHuman:   Number(ethers.formatUnits(q.toAmount, proto.depositToken.decimals)),
+                txHash:          step1Hash,
+                toolUsed:        `${proto.name} via LiFi`,
+                timestamp:       Date.now(),
+                status:          'completed',
+            });
+
+            acquiredAmount = BigInt(q.toAmount);
+            setExecState(s => ({ ...s, phase: 'depositing', step1Hash }));
+        } else {
+            // User already holds the target asset — skip swap
+            acquiredAmount = ethers.parseUnits(parsedAmount.toFixed(proto.depositToken.decimals), proto.depositToken.decimals);
+            setExecState(s => ({ ...s, phase: 'depositing' }));
+        }
+
+        // ── Step 2: Deposit into protocol vault ────────────────────────────
+        let step2Hash: string | null = null;
+
+        if (proto.contractAddress) {
+            const result = await depositToProtocol(signer, proto, acquiredAmount);
+            step2Hash = result.txHash;
+        }
+        // If contractAddress is null, we skip the on-chain deposit.
+        // The UI will show the website link so the user can do it manually.
+
+        setExecState({ phase: 'done', step1Hash, step2Hash, error: null });
+        refreshBalances();
+    }, [getSigner, parsedAmount, quote, useOwnToken, walletAddress, refreshBalances]);
+
+    const handleExecute = useCallback(async (proto: DeFiProtocol) => {
+        try {
+            await handleStakeAndDeposit(proto);
+        } catch (err) {
+            setExecState(s => ({
+                ...s,
+                phase: 'error',
+                error: err instanceof Error ? err.message : 'Transaction failed',
+            }));
+        }
+    }, [handleStakeAndDeposit]);
+
+    // AI analysis
+    const handleAnalyze = async () => {
+        setAnalyzing(true);
+        setRecommendation(null);
+        try {
+            const rec = await analyzeDeFi(usdcBalance, xautBalance, wbtcBalance);
+            setRecommendation(rec);
+            if (rec.action === 'ENTER') setSelectedId(rec.protocolId);
+        } catch {
+            const fallback = DEFI_PROTOCOLS[0];
+            setRecommendation({ protocolId: fallback.id, reason: 'AI unavailable — showing highest APY.', confidence: 60, action: 'ENTER' });
+            setSelectedId(fallback.id);
         } finally {
-            setIsSending(false);
+            setAnalyzing(false);
         }
     };
 
-    const copyAddress = async () => {
-        if (user?.wallet?.address) {
-            await navigator.clipboard.writeText(user.wallet.address);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+    // Auto: pick recommended (or highest APY), use 10% of USDC balance
+    const handleAuto = async () => {
+        if (!walletAddress || usdcBalance <= 0) return;
+        setAutoRunning(true);
+        try {
+            const proto = recommendation?.action === 'ENTER'
+                ? (DEFI_PROTOCOLS.find(p => p.id === recommendation.protocolId) ?? DEFI_PROTOCOLS[0])
+                : DEFI_PROTOCOLS[0];
+
+            const autoAmount = Math.max(1, Math.floor(usdcBalance * 0.1 * 100) / 100);
+            setSelectedId(proto.id);
+            setUseOwnToken(false);
+            setAmount(autoAmount.toString());
+
+            // Small delay so state settles, then execute
+            await new Promise(r => setTimeout(r, 100));
+            await handleExecute(proto);
+        } catch (err) {
+            setExecState(s => ({
+                ...s,
+                phase: 'error',
+                error: err instanceof Error ? err.message : 'Auto failed',
+            }));
+        } finally {
+            setAutoRunning(false);
         }
     };
-
-    const quickAmounts = [10, 25, 50, 100];
 
     if (!ready || !authenticated) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
             </div>
         );
     }
 
-    return (
-        <MobileLayout activeTab="pay" showNav={!isScanning}>
-            {isScanning && (
-                <div className="fixed inset-0 z-50 bg-black flex flex-col">
-                    <div className="flex items-center justify-between p-4 bg-black/80">
-                        <button onClick={stopScanning} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors">
-                            <X className="w-6 h-6 text-white" />
-                        </button>
-                        <span className="text-white font-medium">Scan Wallet QR Code</span>
-                        <div className="w-10" />
-                    </div>
-                    <div className="flex-1 flex flex-col items-center justify-center p-4">
-                        <div id="qr-reader" className="w-full max-w-sm rounded-3xl overflow-hidden" style={{ background: '#000' }} />
-                        {scanSuccess && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-                                <div className="bg-green-500 rounded-full p-6 animate-bounce">
-                                    <Check className="w-16 h-16 text-white" />
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <div className="p-6 text-center bg-black/80">
-                        <p className="text-white/70 text-sm">Scan any EVM wallet QR code to auto-fill the address</p>
-                        {error && (
-                            <div className="mt-4 flex items-center justify-center gap-2 text-red-400">
-                                <AlertCircle className="w-4 h-4" />
-                                <span className="text-sm">{error}</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
+    const isExecuting = execState.phase === 'swapping' || execState.phase === 'depositing';
 
-            <div className="bg-gradient-to-b from-primary to-primary/90 text-white px-4 pt-12 pb-8 rounded-b-3xl">
-                <div className="flex items-center gap-4 mb-6">
-                    <button
-                        onClick={() => router.push('/dashboard')}
-                        className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-                    >
+    return (
+        <MobileLayout activeTab="pay">
+            {/* ── Header ─────────────────────────────────────────────────── */}
+            <div className="bg-background sticky top-0 z-40 px-4 pt-12 pb-3 border-b border-border">
+                <div className="flex items-center gap-3 mb-3">
+                    <button onClick={() => router.push('/dashboard')} className="p-2 rounded-full bg-muted hover:bg-secondary transition-colors">
                         <ArrowLeft className="w-5 h-5" />
                     </button>
-                    <h1 className="text-xl font-semibold">Pay USDC</h1>
+                    <div className="flex-1">
+                        <h1 className="text-xl font-semibold">DeFi Yield</h1>
+                        {/* Balance row */}
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                            <span className="text-xs text-muted-foreground">
+                                USDC <span className="font-medium text-foreground">${usdcBalance.toFixed(2)}</span>
+                            </span>
+                            {xautBalance > 0.000001 && (
+                                <span className="text-xs text-muted-foreground">
+                                    XAUt0 <span className="font-medium text-foreground">{xautBalance.toFixed(4)}</span>
+                                </span>
+                            )}
+                            {wbtcBalance > 0.000001 && (
+                                <span className="text-xs text-muted-foreground">
+                                    WBTC <span className="font-medium text-foreground">{wbtcBalance.toFixed(6)}</span>
+                                </span>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
-                <div className="bg-white/10 rounded-2xl p-4 mb-4">
-                    <p className="text-white/70 text-sm">Available USDC</p>
-                    <p className="text-3xl font-bold">${balances.usdc.toFixed(2)}</p>
-                </div>
-
-                <div className="flex gap-2 bg-white/10 rounded-2xl p-1">
+                {/* Action bar */}
+                <div className="flex gap-2">
                     <button
-                        onClick={() => setMode('scan')}
-                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-colors ${
-                            mode === 'scan' ? 'bg-white text-primary' : 'text-white/80 hover:text-white'
-                        }`}
+                        onClick={handleAnalyze}
+                        disabled={analyzing || autoRunning}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-muted hover:bg-secondary text-sm font-medium transition-colors disabled:opacity-50"
                     >
-                        <QrCode className="w-5 h-5" />
-                        Scan QR
+                        {analyzing
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing…</>
+                            : <><Brain className="w-4 h-4" /> Analyze</>}
                     </button>
                     <button
-                        onClick={() => setMode('send')}
-                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-colors ${
-                            mode === 'send' ? 'bg-white text-primary' : 'text-white/80 hover:text-white'
-                        }`}
+                        onClick={handleAuto}
+                        disabled={autoRunning || analyzing || usdcBalance <= 0}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold transition-colors disabled:opacity-50 active:scale-[0.98]"
                     >
-                        <Send className="w-5 h-5" />
-                        Transfer
+                        {autoRunning
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Running…</>
+                            : <><Zap className="w-4 h-4" /> Auto</>}
                     </button>
                 </div>
             </div>
 
-            <div className="p-4 space-y-6 animate-fade-in">
-                {mode === 'scan' ? (
-                    <>
-                        <div className="bg-card rounded-2xl p-6 border border-border">
-                            <div className="text-center space-y-4">
-                                <div className="w-20 h-20 mx-auto bg-primary/10 rounded-2xl flex items-center justify-center">
-                                    <Camera className="w-10 h-10 text-primary" />
-                                </div>
-                                <div>
-                                    <h3 className="font-semibold text-lg">Scan to Pay</h3>
-                                    <p className="text-muted-foreground text-sm mt-1">
-                                        Scan any EVM wallet QR code to send USDC instantly
-                                    </p>
-                                </div>
-                                <Button
-                                    onClick={startScanning}
-                                    className="w-full bg-primary hover:bg-primary/90 text-white py-6 text-base rounded-xl"
+            <div className="px-4 py-4 space-y-4 pb-28">
+
+                {/* AI Recommendation banner */}
+                {recommendation && (
+                    <div className={`ios-card p-4 flex gap-3 border ${
+                        recommendation.action === 'ENTER'
+                            ? 'border-primary/30 bg-primary/5'
+                            : 'border-warning/30 bg-warning-soft'
+                    }`}>
+                        <Sparkles className={`w-5 h-5 mt-0.5 shrink-0 ${recommendation.action === 'ENTER' ? 'text-primary' : 'text-[var(--warning)]'}`} />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className={`text-sm font-semibold ${recommendation.action === 'ENTER' ? 'text-primary' : 'text-[var(--warning)]'}`}>
+                                    {recommendation.action === 'ENTER'
+                                        ? `AI Pick: ${DEFI_PROTOCOLS.find(p => p.id === recommendation.protocolId)?.name}`
+                                        : 'AI: Wait for better opportunity'}
+                                </span>
+                                <span className="text-xs text-muted-foreground">{recommendation.confidence}%</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">{recommendation.reason}</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Protocol list */}
+                <div className="space-y-2">
+                    {DEFI_PROTOCOLS.map(proto => {
+                        const risk        = RISK_STYLE[proto.risk];
+                        const isSelected  = selectedId === proto.id;
+                        const isRec       = recommendation?.protocolId === proto.id && recommendation.action === 'ENTER';
+                        const tokenBal    = tokenBalance(proto);
+                        const hasToken    = tokenBal > 0.000001;
+                        const state       = isSelected ? execState : IDLE_STATE;
+
+                        return (
+                            <div key={proto.id} className={`ios-card overflow-hidden transition-all ${isSelected ? 'ring-2 ring-primary/40' : ''}`}>
+                                {/* Protocol row */}
+                                <button
+                                    className="w-full flex items-center gap-3 p-4 hover:bg-muted/40 transition-colors text-left"
+                                    onClick={() => {
+                                        setSelectedId(isSelected ? null : proto.id);
+                                        if (!isSelected) setExecState(IDLE_STATE);
+                                    }}
                                 >
-                                    <Camera className="w-5 h-5 mr-2" />
-                                    Open Scanner
-                                </Button>
-                            </div>
-                        </div>
-
-                        <div className="bg-card rounded-2xl p-6 border border-border">
-                            <h3 className="font-semibold mb-4">Receive Payment</h3>
-                            <div className="bg-muted rounded-xl p-4">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Your Address</p>
-                                        <p className="font-mono text-sm mt-1">
-                                            {user?.wallet?.address
-                                                ? `${user.wallet.address.slice(0, 10)}...${user.wallet.address.slice(-8)}`
-                                                : 'Not connected'}
-                                        </p>
+                                    <span className="text-2xl">{proto.icon}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-semibold">{proto.name}</span>
+                                            {isRec && (
+                                                <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary text-white font-medium">AI</span>
+                                            )}
+                                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${risk.cls}`}>{risk.label}</span>
+                                        </div>
+                                        <div className="flex items-center gap-3 mt-0.5">
+                                            <span className="text-sm text-muted-foreground">{proto.depositAsset}</span>
+                                            <span className="text-xs text-muted-foreground">TVL {proto.tvl}</span>
+                                            {hasToken && (
+                                                <span className="text-xs text-[var(--success)] font-medium">
+                                                    Have {tokenBal.toFixed(4)}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                    <button
-                                        onClick={copyAddress}
-                                        className="p-3 rounded-xl bg-background hover:bg-secondary transition-colors"
-                                    >
-                                        {copied ? (
-                                            <Check className="w-5 h-5 text-green-500" />
-                                        ) : (
-                                            <Copy className="w-5 h-5 text-muted-foreground" />
+                                    <div className="text-right shrink-0">
+                                        <p className="text-lg font-bold text-[var(--success)]">{proto.apy}%</p>
+                                        <p className="text-xs text-muted-foreground">APY</p>
+                                    </div>
+                                    <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform ${isSelected ? 'rotate-90' : ''}`} />
+                                </button>
+
+                                {/* Expanded panel */}
+                                {isSelected && (
+                                    <div className="px-4 pb-4 border-t border-border pt-3 space-y-4">
+                                        <p className="text-xs text-muted-foreground leading-relaxed">{proto.desc}</p>
+
+                                        {/* 2-step flow diagram */}
+                                        <div className="flex items-center gap-2 text-xs">
+                                            <div className={`flex-1 rounded-lg p-2 text-center font-medium ${!useOwnToken ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground line-through'}`}>
+                                                Step 1<br />
+                                                <span className="font-normal">USDC → {proto.depositAsset}</span><br />
+                                                <span className="opacity-70">via LiFi</span>
+                                            </div>
+                                            <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                                            <div className={`flex-1 rounded-lg p-2 text-center font-medium ${proto.contractAddress ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                                                Step 2<br />
+                                                <span className="font-normal">{proto.depositAsset} → Vault</span><br />
+                                                <span className="opacity-70">{proto.contractAddress ? 'on-chain' : 'via website'}</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Skip swap toggle (if user has token) */}
+                                        {hasToken && (
+                                            <div className="flex items-center gap-2 bg-muted rounded-xl p-3">
+                                                <Coins className="w-4 h-4 text-[var(--success)] shrink-0" />
+                                                <p className="text-xs flex-1">
+                                                    You already have <strong>{tokenBal.toFixed(4)} {proto.depositAsset}</strong>
+                                                </p>
+                                                <button
+                                                    onClick={() => { setUseOwnToken(!useOwnToken); setAmount(''); }}
+                                                    className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${
+                                                        useOwnToken
+                                                            ? 'bg-primary text-white'
+                                                            : 'bg-background border border-border'
+                                                    }`}
+                                                >
+                                                    {useOwnToken ? 'Use my token' : 'Buy with USDC'}
+                                                </button>
+                                            </div>
                                         )}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <div className="bg-card rounded-2xl p-6 border border-border space-y-6">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Recipient Address</label>
-                                <div className="relative">
-                                    <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                    <Input
-                                        value={recipientAddress}
-                                        onChange={(e) => { setRecipientAddress(e.target.value); setError(''); }}
-                                        placeholder="0x..."
-                                        className="pl-12 py-6 text-base rounded-xl font-mono"
-                                        disabled={isSending}
-                                    />
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                    Enter any EVM wallet address (Monad Testnet)
-                                </p>
-                            </div>
 
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-sm font-medium">Amount (USDC)</label>
-                                    <span className="text-xs text-muted-foreground">
-                                        Balance: ${balances.usdc.toFixed(2)}
-                                    </span>
-                                </div>
-                                <div className="relative">
-                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-medium text-muted-foreground px-1">
-                                        <DollarSign className="w-5 h-5" />
-                                    </span>
-                                    <Input
-                                        type="number"
-                                        value={amount}
-                                        onChange={(e) => { setAmount(e.target.value); setError(''); }}
-                                        placeholder="0.00"
-                                        className="pl-12 py-6 text-2xl font-semibold rounded-xl"
-                                        disabled={isSending}
-                                    />
-                                </div>
+                                        {/* Amount input */}
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium">
+                                                {useOwnToken
+                                                    ? `Amount (${proto.depositAsset})`
+                                                    : 'Amount (USDC)'}
+                                            </label>
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    type="number"
+                                                    placeholder="0.00"
+                                                    value={amount}
+                                                    onChange={e => { setAmount(e.target.value); setExecState(IDLE_STATE); }}
+                                                    className="rounded-xl py-5 text-lg font-semibold flex-1"
+                                                    disabled={isExecuting}
+                                                />
+                                                <button
+                                                    onClick={() => setAmount(
+                                                        useOwnToken
+                                                            ? (tokenBal * 0.5).toFixed(6)
+                                                            : (usdcBalance * 0.5).toFixed(2)
+                                                    )}
+                                                    className="px-3 py-2 rounded-xl bg-muted text-xs font-medium hover:bg-secondary transition-colors"
+                                                >50%</button>
+                                                <button
+                                                    onClick={() => setAmount(
+                                                        useOwnToken
+                                                            ? tokenBal.toFixed(6)
+                                                            : usdcBalance.toFixed(2)
+                                                    )}
+                                                    className="px-3 py-2 rounded-xl bg-muted text-xs font-medium hover:bg-secondary transition-colors"
+                                                >Max</button>
+                                            </div>
+                                        </div>
 
-                                <div className="flex gap-2 pt-2">
-                                    {quickAmounts.map((amt) => (
-                                        <button
-                                            key={amt}
-                                            onClick={() => setAmount(amt.toString())}
-                                            disabled={amt > balances.usdc || isSending}
-                                            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                                amount === amt.toString()
-                                                    ? 'bg-primary text-white'
-                                                    : 'bg-muted hover:bg-secondary text-foreground'
-                                            } ${amt > balances.usdc ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                        >
-                                            ${amt}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
+                                        {/* LiFi quote preview (swap step only) */}
+                                        {!useOwnToken && (
+                                            <>
+                                                {quoteLoading && (
+                                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                        <Loader2 className="w-4 h-4 animate-spin" /> Getting quote…
+                                                    </div>
+                                                )}
+                                                {quote && !quoteLoading && (
+                                                    <div className="bg-muted rounded-xl p-3 space-y-1 text-sm">
+                                                        <div className="flex justify-between">
+                                                            <span className="text-muted-foreground">Step 1 output</span>
+                                                            <span className="font-semibold">
+                                                                {Number(ethers.formatUnits(quote.toAmount, proto.depositToken.decimals)).toFixed(6)} {proto.depositAsset}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex justify-between text-xs text-muted-foreground">
+                                                            <span>Via {quote.toolUsed}</span>
+                                                            <span>Fee ${quote.feeUSD.toFixed(4)}</span>
+                                                        </div>
+                                                        <p className="text-xs text-muted-foreground pt-1 border-t border-border">
+                                                            Step 2: {Number(ethers.formatUnits(quote.toAmount, proto.depositToken.decimals)).toFixed(6)} {proto.depositAsset} → {proto.name} vault
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
 
-                            {error && (
-                                <div className="flex items-center gap-2 text-red-500 text-sm bg-red-50 dark:bg-red-500/10 p-3 rounded-xl">
-                                    <AlertCircle className="w-4 h-4 shrink-0" />
-                                    {error}
-                                </div>
-                            )}
+                                        {/* Execution progress */}
+                                        {state.phase !== 'idle' && state.phase !== 'error' && (
+                                            <div className="space-y-1.5">
+                                                <StepRow
+                                                    n={1}
+                                                    label={useOwnToken ? 'Skipped (using own token)' : 'Swap USDC → ' + proto.depositAsset}
+                                                    done={state.step1Hash !== null || useOwnToken}
+                                                    active={state.phase === 'swapping'}
+                                                    hash={state.step1Hash}
+                                                    skipped={useOwnToken}
+                                                />
+                                                <StepRow
+                                                    n={2}
+                                                    label={'Deposit ' + proto.depositAsset + ' → ' + proto.name}
+                                                    done={state.step2Hash !== null || (state.phase === 'done' && !proto.contractAddress)}
+                                                    active={state.phase === 'depositing'}
+                                                    hash={state.step2Hash}
+                                                    skipped={false}
+                                                />
+                                            </div>
+                                        )}
 
-                            {txHash && (
-                                <div className="flex items-center gap-2 text-green-500 text-sm bg-green-50 dark:bg-green-500/10 p-3 rounded-xl">
-                                    <Check className="w-4 h-4 shrink-0" />
-                                    <span>Sent!</span>
-                                    <a
-                                        href={`${EXPLORER_URL}/tx/${txHash}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-1 underline"
-                                    >
-                                        View <ExternalLink className="w-3 h-3" />
-                                    </a>
-                                </div>
-                            )}
-
-                            <Button
-                                onClick={handleSend}
-                                disabled={isSending || !amount || !recipientAddress}
-                                className="w-full bg-primary hover:bg-primary/90 text-white py-6 text-base rounded-xl disabled:opacity-50"
-                            >
-                                {isSending ? (
-                                    <>
-                                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                                        Sending...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Send className="w-5 h-5 mr-2" />
-                                        Send USDC
-                                    </>
-                                )}
-                            </Button>
-                        </div>
-
-                        {recentRecipients.length > 0 && (
-                            <div className="bg-card rounded-2xl p-4 border border-border">
-                                <h3 className="font-semibold mb-3 px-2">Recent</h3>
-                                <div className="space-y-1">
-                                    {recentRecipients.map((recipient, i) => (
-                                        <button
-                                            key={i}
-                                            onClick={() => setRecipientAddress(recipient.address)}
-                                            className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-muted transition-colors"
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-amber-500 flex items-center justify-center text-white font-medium">
-                                                    {recipient.address.slice(2, 4).toUpperCase()}
-                                                </div>
-                                                <div className="text-left">
-                                                    <p className="font-mono text-sm">
-                                                        {recipient.address.slice(0, 6)}...{recipient.address.slice(-4)}
+                                        {/* Done state */}
+                                        {state.phase === 'done' && (
+                                            <div className="flex items-start gap-2 text-sm bg-success-soft text-[var(--success)] rounded-xl p-3">
+                                                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                                                <div className="flex-1">
+                                                    <p className="font-medium">
+                                                        {proto.contractAddress ? 'Staked successfully!' : 'Swap complete!'}
                                                     </p>
+                                                    {!proto.contractAddress && (
+                                                        <a
+                                                            href={proto.websiteUrl}
+                                                            target="_blank" rel="noopener noreferrer"
+                                                            className="text-xs flex items-center gap-1 mt-1 hover:underline"
+                                                        >
+                                                            Deposit {proto.depositAsset} at {proto.name}
+                                                            <ExternalLink className="w-3 h-3" />
+                                                        </a>
+                                                    )}
                                                 </div>
                                             </div>
-                                            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
+                                        )}
 
-                        <div className="bg-muted/50 rounded-xl p-3 text-center text-xs text-muted-foreground">
-                            Sending on <span className="font-medium">Monad Testnet</span>
-                        </div>
-                    </>
-                )}
+                                        {/* Error state */}
+                                        {state.phase === 'error' && (
+                                            <div className="flex items-start gap-2 text-sm bg-destructive/10 text-destructive rounded-xl p-3">
+                                                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                                                <p className="flex-1 break-all">{state.error}</p>
+                                            </div>
+                                        )}
+
+                                        {/* Execute button */}
+                                        <button
+                                            onClick={() => handleExecute(proto)}
+                                            disabled={
+                                                parsedAmount <= 0 ||
+                                                isExecuting ||
+                                                (!useOwnToken && !quote && parsedAmount > 0) ||
+                                                (!useOwnToken && parsedAmount > usdcBalance) ||
+                                                (useOwnToken && parsedAmount > tokenBal)
+                                            }
+                                            className="w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 bg-primary text-white disabled:opacity-50 transition-all active:scale-[0.98]"
+                                        >
+                                            {isExecuting ? (
+                                                <>
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                    {execState.phase === 'swapping' ? 'Swapping…' : 'Depositing…'}
+                                                </>
+                                            ) : !useOwnToken && !quote && parsedAmount > 0 ? (
+                                                <><Loader2 className="w-4 h-4 animate-spin" /> Getting quote…</>
+                                            ) : !useOwnToken && parsedAmount > usdcBalance ? (
+                                                'Insufficient USDC'
+                                            ) : useOwnToken && parsedAmount > tokenBal ? (
+                                                `Insufficient ${proto.depositAsset}`
+                                            ) : (
+                                                <>
+                                                    <TrendingUp className="w-4 h-4" />
+                                                    {useOwnToken
+                                                        ? `Deposit ${parsedAmount > 0 ? parsedAmount.toFixed(6) : '0'} ${proto.depositAsset}`
+                                                        : `Swap + Stake $${parsedAmount > 0 ? parsedAmount.toFixed(2) : '0'} → ${proto.depositAsset}`}
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
         </MobileLayout>
     );
 }
 
-export default function PayPage() {
+// ─── Step progress row ────────────────────────────────────────────────────────
+
+function StepRow({
+    n, label, done, active, hash, skipped,
+}: {
+    n: number;
+    label: string;
+    done: boolean;
+    active: boolean;
+    hash: string | null;
+    skipped: boolean;
+}) {
     return (
-        <Suspense fallback={
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <div className={`flex items-center gap-2 text-xs ${skipped ? 'opacity-40' : ''}`}>
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 font-bold text-[10px] ${
+                done    ? 'bg-[var(--success)] text-white' :
+                active  ? 'bg-primary text-white' :
+                          'bg-muted text-muted-foreground'
+            }`}>
+                {done ? '✓' : active ? <Loader2 className="w-3 h-3 animate-spin" /> : n}
             </div>
-        }>
-            <PayPageContent />
-        </Suspense>
+            <span className={`flex-1 ${done ? 'text-[var(--success)]' : active ? 'text-foreground' : 'text-muted-foreground'}`}>
+                {label}
+            </span>
+            {hash && (
+                <a
+                    href={`${EXPLORER_URL}/tx/${hash}`}
+                    target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-0.5 text-muted-foreground hover:text-foreground"
+                >
+                    {hash.slice(0, 6)}…<ExternalLink className="w-2.5 h-2.5" />
+                </a>
+            )}
+        </div>
     );
 }

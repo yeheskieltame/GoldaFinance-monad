@@ -53,7 +53,7 @@ async function analyzeMarket(
     const volatility = (Math.abs(high24h - low24h) / currentPrice) * 100;
     const emaPrice = currentPrice * 0.998;
 
-    const prompt = `You are GOLDA AI, an expert savings advisor for an inflation-resistant USDC vault that routes deposits into tokenized gold (PAXG/XAUt0) and BTC. Analyze the current gold market and decide whether the user should DEPOSIT NOW or WAIT for a better entry.
+    const prompt = `You are GOLDA AI, an expert savings advisor for an inflation-resistant USDC vault that routes deposits into tokenized gold (XAUt0) and BTC. Analyze the current gold market and decide whether the user should DEPOSIT NOW or WAIT for a better entry.
 
 CURRENT MARKET DATA:
 - Current Gold Price (XAU/USD): $${currentPrice.toFixed(2)}

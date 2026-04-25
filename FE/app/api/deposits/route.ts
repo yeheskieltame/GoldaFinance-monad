@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { promises as fs } from 'fs';
+import path from 'path';
 
-export type SavingsAssetId = 'PAXG' | 'XAUT' | 'WBTC';
+export type SavingsAssetId = 'XAUT' | 'WBTC';
 
 export interface Deposit {
   depositId: string;
@@ -14,10 +16,42 @@ export interface Deposit {
   lifiToAmount?: number;     // est. amount of asset received
   lifiFeeUSD?: number;
   goldReceived?: number;     // legacy alias of lifiToAmount
-  createdAt: Date;
+  createdAt: string;
 }
 
-const deposits: Deposit[] = [];
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DEPOSITS_FILE = path.join(DATA_DIR, 'deposits.json');
+
+// In-memory cache for deposits
+let depositsCache: Deposit[] | null = null;
+
+async function ensureDataDir() {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+  } catch (e) {
+    // Directory may already exist
+  }
+}
+
+async function loadDeposits(): Promise<Deposit[]> {
+  if (depositsCache) return depositsCache;
+  
+  try {
+    await ensureDataDir();
+    const data = await fs.readFile(DEPOSITS_FILE, 'utf-8');
+    depositsCache = JSON.parse(data);
+    return depositsCache || [];
+  } catch (e) {
+    // File doesn't exist or is corrupted
+    return [];
+  }
+}
+
+async function saveDeposits(deposits: Deposit[]) {
+  await ensureDataDir();
+  await fs.writeFile(DEPOSITS_FILE, JSON.stringify(deposits, null, 2));
+  depositsCache = deposits;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -43,11 +77,13 @@ export async function POST(req: NextRequest) {
       lifiTool,
       lifiToAmount,
       lifiFeeUSD,
-      createdAt: new Date(),
+      createdAt: new Date().toISOString(),
     };
 
+    const deposits = await loadDeposits();
     deposits.unshift(deposit);
     if (deposits.length > 1000) deposits.pop();
+    await saveDeposits(deposits);
 
     return NextResponse.json({
       success: true,
@@ -64,4 +100,18 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export { deposits };
+export async function GET() {
+  try {
+    const deposits = await loadDeposits();
+    return NextResponse.json({
+      success: true,
+      deposits: deposits.slice(0, 100),
+    });
+  } catch (error) {
+    console.error('Deposits GET Error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch deposits' },
+      { status: 500 }
+    );
+  }
+}

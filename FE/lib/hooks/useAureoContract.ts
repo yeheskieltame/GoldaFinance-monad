@@ -17,7 +17,7 @@ import {
     approveUSDC,
     WithdrawalView,
 } from '@/lib/services/contractService';
-import { MONAD_TESTNET } from '@/lib/types';
+import { MONAD_MAINNET } from '@/lib/types';
 
 // ============================================
 // Types
@@ -30,6 +30,8 @@ export interface VaultBalances {
     navUSDC: number;
     shareValueUSDC: number;
     usdcAllowance: number;
+    xaut: number;
+    wbtc: number;
 }
 
 export interface TransactionResult {
@@ -53,6 +55,8 @@ export function useGoldaVault() {
         navUSDC: 0,
         shareValueUSDC: 0,
         usdcAllowance: 0,
+        xaut: 0,
+        wbtc: 0,
     });
     const [withdrawals, setWithdrawals] = useState<WithdrawalView[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -115,8 +119,8 @@ export function useGoldaVault() {
                             method: 'wallet_addEthereumChain',
                             params: [{
                                 chainId: chainIdHex,
-                                chainName: MONAD_TESTNET.name,
-                                nativeCurrency: MONAD_TESTNET.nativeCurrency,
+                                chainName: MONAD_MAINNET.name,
+                                nativeCurrency: MONAD_MAINNET.nativeCurrency,
                                 rpcUrls: [RPC_URL],
                                 blockExplorerUrls: [EXPLORER_URL],
                             }],

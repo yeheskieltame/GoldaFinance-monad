@@ -1,5 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deposits } from '../route';
+import { promises as fs } from 'fs';
+import path from 'path';
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DEPOSITS_FILE = path.join(DATA_DIR, 'deposits.json');
+
+interface Deposit {
+  depositId: string;
+  walletAddress: string;
+  amount: number;
+  asset: 'XAUT' | 'WBTC';
+  txHash: string;
+  status: 'pending' | 'routing' | 'completed' | 'failed';
+  lifiTool?: string;
+  lifiToAmount?: number;
+  lifiFeeUSD?: number;
+  createdAt: string;
+}
+
+async function loadDeposits(): Promise<Deposit[]> {
+  try {
+    const data = await fs.readFile(DEPOSITS_FILE, 'utf-8');
+    return JSON.parse(data) || [];
+  } catch (e) {
+    return [];
+  }
+}
 
 export async function GET(
   _req: NextRequest,
@@ -7,6 +33,7 @@ export async function GET(
 ) {
   try {
     const { depositId } = await params;
+    const deposits = await loadDeposits();
     const deposit = deposits.find((d) => d.depositId === depositId);
 
     if (!deposit) {

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
-type FilterType = 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'transfer';
+type FilterType = 'all' | 'deposit' | 'withdraw_request' | 'claim' | 'swap';
 
 export default function HistoryPage() {
     const router = useRouter();
@@ -39,9 +39,7 @@ export default function HistoryPage() {
     const filteredTransactions = useMemo(() => {
         return transactions.filter(tx => {
             if (filter !== 'all') {
-                if (filter === 'transfer') {
-                    if (tx.type !== 'transfer_in' && tx.type !== 'transfer_out') return false;
-                } else if (tx.type !== filter) return false;
+                if (tx.type !== filter) return false;
             }
             if (searchQuery) {
                 const s = searchQuery.toLowerCase();
@@ -67,7 +65,7 @@ export default function HistoryPage() {
     if (!ready || !authenticated) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
             </div>
         );
     }
@@ -76,14 +74,13 @@ export default function HistoryPage() {
         switch (type) {
             case 'deposit':
             case 'claim':
-            case 'transfer_in':
-                return <ArrowDownLeft className="w-5 h-5 text-green-500" />;
+                return <ArrowDownLeft className="w-5 h-5 text-[var(--success)]" />;
             case 'withdraw_request':
-                return <Hourglass className="w-5 h-5 text-amber-500" />;
-            case 'transfer_out':
-                return <ArrowUpRight className="w-5 h-5 text-orange-500" />;
+                return <Hourglass className="w-5 h-5 text-[var(--warning)]" />;
+            case 'swap':
+                return <Sparkles className="w-5 h-5 text-[var(--info)]" />;
             default:
-                return <Sparkles className="w-5 h-5 text-amber-500" />;
+                return <Sparkles className="w-5 h-5 text-[var(--warning)]" />;
         }
     };
 
@@ -91,19 +88,18 @@ export default function HistoryPage() {
         switch (type) {
             case 'deposit':
             case 'claim':
-            case 'transfer_in':
-                return 'bg-green-100 dark:bg-green-500/20';
+                return 'bg-success-soft';
             case 'withdraw_request':
-                return 'bg-amber-100 dark:bg-amber-500/20';
-            case 'transfer_out':
-                return 'bg-orange-100 dark:bg-orange-500/20';
+                return 'bg-warning-soft';
+            case 'swap':
+                return 'bg-info-soft';
             default:
-                return 'bg-amber-100 dark:bg-amber-500/20';
+                return 'bg-warning-soft';
         }
     };
 
     const amountDisplay = (tx: Transaction) => {
-        const isInflow = tx.type === 'deposit' || tx.type === 'claim' || tx.type === 'transfer_in';
+        const isInflow = tx.type === 'deposit' || tx.type === 'claim';
         const sign = isInflow ? '+' : '-';
         const primary = `${sign}$${tx.amount.toFixed(2)} USDC`;
         let secondary = '';
@@ -113,8 +109,8 @@ export default function HistoryPage() {
             secondary = tx.shares ? `-${tx.shares.toFixed(4)} gUSDC` : 'Queued';
         } else if (tx.type === 'claim') {
             secondary = `Claim #${tx.withdrawalId ?? ''}`;
-        } else if (tx.type === 'transfer_in') {
-            secondary = 'Received';
+        } else if (tx.type === 'swap') {
+            secondary = 'Auto-Swap';
         } else {
             secondary = 'Sent';
         }
@@ -159,7 +155,7 @@ export default function HistoryPage() {
                         { id: 'deposit', label: 'Deposits' },
                         { id: 'withdraw_request', label: 'Withdraws' },
                         { id: 'claim', label: 'Claims' },
-                        { id: 'transfer', label: 'Transfers' },
+                        { id: 'swap', label: 'Swaps' },
                     ].map((f) => (
                         <button
                             key={f.id}
@@ -179,7 +175,7 @@ export default function HistoryPage() {
             {isLoading && transactions.length === 0 && (
                 <div className="flex items-center justify-center py-20">
                     <div className="text-center space-y-4">
-                        <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto" />
+                        <Loader2 className="w-10 h-10 animate-spin text-foreground mx-auto" />
                         <p className="text-muted-foreground">Loading transactions from Monad...</p>
                     </div>
                 </div>
@@ -187,7 +183,7 @@ export default function HistoryPage() {
 
             {error && (
                 <div className="px-4 py-4">
-                    <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 text-red-600 dark:text-red-400 text-center">
+                    <div className="bg-destructive-soft rounded-xl p-4 text-[var(--destructive)] dark:text-[var(--destructive)] text-center">
                         {error}
                         <button onClick={refetch} className="block mx-auto mt-2 underline">
                             Try again
@@ -203,7 +199,7 @@ export default function HistoryPage() {
                             <Calendar className="w-4 h-4" />
                             {date}
                         </h3>
-                        <div className="bg-card rounded-2xl border border-border overflow-hidden divide-y divide-border">
+                        <div className="ios-card overflow-hidden divide-y divide-border">
                             {txs.map((tx) => {
                                 const { time } = formatTransactionDate(tx.timestamp);
                                 const disp = amountDisplay(tx);
@@ -221,7 +217,7 @@ export default function HistoryPage() {
                                                     href={`${explorerBaseUrl}${tx.txHash}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="flex items-center gap-1 hover:text-primary"
+                                                    className="flex items-center gap-1 hover:text-foreground"
                                                 >
                                                     <span className="font-mono">{tx.txHash.slice(0, 6)}...{tx.txHash.slice(-4)}</span>
                                                     <ExternalLink className="w-3 h-3" />
@@ -229,7 +225,7 @@ export default function HistoryPage() {
                                             </div>
                                         </div>
                                         <div className="text-right">
-                                            <p className={`font-semibold ${disp.isInflow ? 'text-green-500' : 'text-foreground'}`}>
+                                            <p className={`font-semibold ${disp.isInflow ? 'text-[var(--success)]' : 'text-foreground'}`}>
                                                 {disp.primary}
                                             </p>
                                             <p className="text-xs text-muted-foreground">{disp.secondary}</p>

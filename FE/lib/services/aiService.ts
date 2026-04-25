@@ -49,7 +49,7 @@ export async function analyzeGoldMarket(
     const mockChange24h = ((currentPrice - mockLow24h) / mockLow24h) * 100;
     const mockVolatility = Math.random() * 2 + 0.5; // 0.5% to 2.5%
 
-    const prompt = `You are GOLDA AI, an expert savings advisor for an inflation-resistant USDC vault that routes deposits into PAXG, XAUt0, and WBTC.
+    const prompt = `You are GOLDA AI, an expert savings advisor for an inflation-resistant USDC vault that routes deposits into XAUt0 and WBTC.
     
 CURRENT MARKET DATA:
 - Current Gold Price: $${currentPrice.toFixed(2)}

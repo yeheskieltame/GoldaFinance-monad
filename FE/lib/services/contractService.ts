@@ -1,33 +1,31 @@
 import { ethers } from "ethers";
 
 // ============================================
-// Golda Finance — GoldaVault on Monad
+// Golda Finance — GoldaVault on Monad Mainnet
 // ============================================
+// MAINNET ONLY. Chain ID 143.
 // One vault, one share token (gUSDC). Users deposit USDC, receive shares,
 // request withdraw (burn + queue), then claim once the vault is liquid.
-// LiFi swaps (USDC -> XAUt0 / WBTC / PAXG) and yield moves are handled
+// LiFi swaps (USDC -> XAUt0 / WBTC) and yield moves are handled
 // off-chain by the operator; this frontend only talks to the vault + USDC.
 // ============================================
 
-export const MONAD_TESTNET_CHAIN_ID = 10143;
-export const MONAD_MAINNET_CHAIN_ID = 143;
-
-const DEFAULT_RPC_URL = "https://testnet-rpc.monad.xyz";
+export const MONAD_CHAIN_ID = 143;
 
 export const RPC_URL =
-  process.env.NEXT_PUBLIC_RPC_URL || DEFAULT_RPC_URL;
+  process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.monad.xyz";
 
 export const CHAIN_ID = Number(
-  process.env.NEXT_PUBLIC_CHAIN_ID || MONAD_TESTNET_CHAIN_ID
+  process.env.NEXT_PUBLIC_CHAIN_ID || MONAD_CHAIN_ID
 );
 
 export const EXPLORER_URL =
-  process.env.NEXT_PUBLIC_EXPLORER_URL ||
-  (CHAIN_ID === MONAD_MAINNET_CHAIN_ID
-    ? "https://monadscan.com"
-    : "https://testnet.monadscan.com");
+  process.env.NEXT_PUBLIC_EXPLORER_URL || "https://monadscan.com";
 
-// Deployed contracts (same address on mainnet and testnet per SC/README.md)
+// ============================================
+// Contract addresses (Monad mainnet)
+// ============================================
+
 const VAULT_ADDRESS =
   process.env.NEXT_PUBLIC_GOLDA_VAULT_ADDRESS ||
   "0xbf8f03002e91daacc8e3597d650a4f1b2d21a39e";
@@ -36,9 +34,20 @@ const USDC_ADDRESS =
   process.env.NEXT_PUBLIC_USDC_ADDRESS ||
   "0x754704Bc059F8C67012fEd69BC8A327a5aafb603";
 
-// Supported savings assets — the contract itself is asset-agnostic, the
-// operator routes USDC -> the selected asset via LiFi off-chain. We still
-// want the user to express a preference so the backend knows what to buy.
+// ============================================
+// Hardcoded decimals (verified on-chain)
+// ============================================
+// These are confirmed via direct eth_call to the contracts on Monad mainnet.
+// We hardcode them to avoid the BAD_DATA / CALL_EXCEPTION errors that occur
+// when the RPC returns empty data for decimals() on some tokens.
+
+const USDC_DECIMALS = 6;
+const VAULT_SHARE_DECIMALS = 18; // gUSDC shares use 18 decimals (ERC20 default)
+
+// ============================================
+// Supported savings assets
+// ============================================
+
 export const SUPPORTED_ASSETS = [
   {
     id: "XAUT",
@@ -46,14 +55,6 @@ export const SUPPORTED_ASSETS = [
     description: "Tether Gold — 1 token = 1 troy oz",
     address: "0x01bFF41798a0BcF287b996046Ca68b395DbC1071",
     decimals: 6,
-    category: "gold",
-  },
-  {
-    id: "PAXG",
-    label: "PAXG",
-    description: "Paxos Gold — 1 token = 1 fine troy oz",
-    address: "",
-    decimals: 18,
     category: "gold",
   },
   {
@@ -68,7 +69,10 @@ export const SUPPORTED_ASSETS = [
 
 export type SupportedAssetId = (typeof SUPPORTED_ASSETS)[number]["id"];
 
-// Minimal GoldaVault ABI — only the entries the frontend uses.
+// ============================================
+// ABIs
+// ============================================
+
 const GOLDA_VAULT_ABI = [
   "function usdc() view returns (address)",
   "function operator() view returns (address)",
@@ -107,6 +111,9 @@ const ERC20_ABI = [
 export const CONTRACT_ADDRESSES = {
   GOLDA_VAULT: VAULT_ADDRESS,
   USDC: USDC_ADDRESS,
+  LIFI_DIAMOND: "0x026F252016A7C47CDEf1F05a3Fc9E20C92a49C37",
+  PERMIT2: "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+  PERMIT2_PROXY: "0x3c6B2E0b7421254846C53c118e24c65d59eAe75e",
 };
 
 export const CONTRACT_ABIS = {
@@ -115,11 +122,18 @@ export const CONTRACT_ABIS = {
 };
 
 // ============================================
-// Reads
+// RPC Provider (singleton for reads)
 // ============================================
 
-function readProvider() {
-  return new ethers.JsonRpcProvider(RPC_URL);
+let _readProvider: ethers.JsonRpcProvider | null = null;
+
+function readProvider(): ethers.JsonRpcProvider {
+  if (!_readProvider) {
+    _readProvider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID, {
+      staticNetwork: true, // prevent auto-chain detection which can cause issues
+    });
+  }
+  return _readProvider;
 }
 
 function vaultRead(provider: ethers.Provider) {
@@ -130,14 +144,15 @@ function usdcRead(provider: ethers.Provider) {
   return new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
 }
 
+// ============================================
+// Reads — with hardcoded decimals & robust error handling
+// ============================================
+
 export async function getUSDCBalance(userAddress: string): Promise<number> {
   try {
     const usdc = usdcRead(readProvider());
-    const [bal, dec] = await Promise.all([
-      usdc.balanceOf(userAddress),
-      usdc.decimals(),
-    ]);
-    return Number(ethers.formatUnits(bal, dec));
+    const bal: bigint = await usdc.balanceOf(userAddress);
+    return Number(ethers.formatUnits(bal, USDC_DECIMALS));
   } catch (err) {
     console.error("getUSDCBalance:", err);
     return 0;
@@ -147,9 +162,9 @@ export async function getUSDCBalance(userAddress: string): Promise<number> {
 export async function getShareBalance(userAddress: string): Promise<number> {
   try {
     const vault = vaultRead(readProvider());
-    const bal = await vault.balanceOf(userAddress);
-    // shares use the same 6 decimals as USDC (SHARE_INIT = 1e6)
-    return Number(ethers.formatUnits(bal, 6));
+    const bal: bigint = await vault.balanceOf(userAddress);
+    // Vault shares use 18 decimals (confirmed on-chain: decimals() returns 18)
+    return Number(ethers.formatUnits(bal, VAULT_SHARE_DECIMALS));
   } catch (err) {
     console.error("getShareBalance:", err);
     return 0;
@@ -160,8 +175,9 @@ export async function getShareBalance(userAddress: string): Promise<number> {
 export async function getSharePrice(): Promise<number> {
   try {
     const vault = vaultRead(readProvider());
-    const price = await vault.sharePrice();
-    return Number(ethers.formatUnits(price, 6));
+    const price: bigint = await vault.sharePrice();
+    // sharePrice returns USDC units (6 decimals) — confirmed on-chain
+    return Number(ethers.formatUnits(price, USDC_DECIMALS));
   } catch (err) {
     console.error("getSharePrice:", err);
     return 1;
@@ -171,8 +187,9 @@ export async function getSharePrice(): Promise<number> {
 export async function getNAV(): Promise<number> {
   try {
     const vault = vaultRead(readProvider());
-    const nav = await vault.navUSDC();
-    return Number(ethers.formatUnits(nav, 6));
+    const nav: bigint = await vault.navUSDC();
+    // navUSDC is in USDC units (6 decimals)
+    return Number(ethers.formatUnits(nav, USDC_DECIMALS));
   } catch (err) {
     console.error("getNAV:", err);
     return 0;
@@ -182,11 +199,8 @@ export async function getNAV(): Promise<number> {
 export async function getUSDCAllowance(userAddress: string): Promise<number> {
   try {
     const usdc = usdcRead(readProvider());
-    const [allowance, dec] = await Promise.all([
-      usdc.allowance(userAddress, VAULT_ADDRESS),
-      usdc.decimals(),
-    ]);
-    return Number(ethers.formatUnits(allowance, dec));
+    const allowance: bigint = await usdc.allowance(userAddress, VAULT_ADDRESS);
+    return Number(ethers.formatUnits(allowance, USDC_DECIMALS));
   } catch (err) {
     console.error("getUSDCAllowance:", err);
     return 0;
@@ -212,17 +226,15 @@ export async function getUserWithdrawals(
     const ids: bigint[] = await vault.userWithdrawals(userAddress);
     if (ids.length === 0) return [];
 
-    const [vaultUsdcBalRaw, dec] = await Promise.all([
-      usdc.balanceOf(VAULT_ADDRESS),
-      usdc.decimals(),
-    ]);
-    let vaultBal = Number(ethers.formatUnits(vaultUsdcBalRaw, dec));
+    const vaultUsdcBalRaw: bigint = await usdc.balanceOf(VAULT_ADDRESS);
+    let vaultBal = Number(ethers.formatUnits(vaultUsdcBalRaw, USDC_DECIMALS));
 
     const rows: WithdrawalView[] = await Promise.all(
       ids.map(async (idBn) => {
         const id = Number(idBn);
         const w = await vault.withdrawals(id);
-        const owed = Number(ethers.formatUnits(w.usdcOwed, dec));
+        // usdcOwed is stored in USDC units (6 decimals)
+        const owed = Number(ethers.formatUnits(w.usdcOwed, USDC_DECIMALS));
         return {
           id,
           user: w.user as string,
@@ -258,17 +270,24 @@ export interface UserBalances {
   navUSDC: number;
   shareValueUSDC: number;
   usdcAllowance: number;
+  xaut: number;
+  wbtc: number;
 }
 
 export async function getUserBalances(
   userAddress: string
 ): Promise<UserBalances> {
-  const [usdc, shares, sharePrice, navUSDC, usdcAllowance] = await Promise.all([
+  const xautAsset = SUPPORTED_ASSETS.find(a => a.id === 'XAUT');
+  const wbtcAsset = SUPPORTED_ASSETS.find(a => a.id === 'WBTC');
+
+  const [usdc, shares, sharePrice, navUSDC, usdcAllowance, xaut, wbtc] = await Promise.all([
     getUSDCBalance(userAddress),
     getShareBalance(userAddress),
     getSharePrice(),
     getNAV(),
     getUSDCAllowance(userAddress),
+    xautAsset ? getTokenBalance(xautAsset.address, userAddress, xautAsset.decimals) : Promise.resolve(0),
+    wbtcAsset ? getTokenBalance(wbtcAsset.address, userAddress, wbtcAsset.decimals) : Promise.resolve(0),
   ]);
 
   return {
@@ -278,7 +297,28 @@ export async function getUserBalances(
     navUSDC,
     shareValueUSDC: shares * sharePrice,
     usdcAllowance,
+    xaut,
+    wbtc,
   };
+}
+
+// ============================================
+// Token balance helper (for any ERC20 on Monad)
+// ============================================
+
+export async function getTokenBalance(
+  tokenAddress: string,
+  userAddress: string,
+  decimals: number
+): Promise<number> {
+  try {
+    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, readProvider());
+    const bal: bigint = await contract.balanceOf(userAddress);
+    return Number(ethers.formatUnits(bal, decimals));
+  } catch (err) {
+    console.error("getTokenBalance:", err);
+    return 0;
+  }
 }
 
 // ============================================
@@ -289,24 +329,45 @@ export interface TxResult {
   txHash: string;
 }
 
-async function usdcDecimals(contract: ethers.Contract): Promise<number> {
-  try {
-    return Number(await contract.decimals());
-  } catch {
-    return 6;
-  }
-}
-
 export async function approveUSDC(
   signer: ethers.Signer,
   usdcAmount: number
 ): Promise<TxResult> {
   const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
-  const dec = await usdcDecimals(usdc);
-  const amountWei = ethers.parseUnits(usdcAmount.toString(), dec);
+  const amountWei = ethers.parseUnits(usdcAmount.toString(), USDC_DECIMALS);
   const tx = await usdc.approve(VAULT_ADDRESS, amountWei);
   const receipt = await tx.wait();
   return { txHash: receipt.hash };
+}
+
+/**
+ * Grant infinite (MaxUint256) approval for USDC to the LiFi Diamond.
+ * This allows the AI agent to execute swaps autonomously without
+ * requiring per-transaction approval signatures.
+ * One signature, then the agent can swap any amount forever.
+ */
+export async function approveUSDCToLiFi(
+  signer: ethers.Signer
+): Promise<TxResult> {
+  const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, signer);
+  const tx = await usdc.approve(CONTRACT_ADDRESSES.LIFI_DIAMOND, ethers.MaxUint256);
+  const receipt = await tx.wait();
+  return { txHash: receipt.hash };
+}
+
+/**
+ * Check if USDC has infinite approval to the LiFi Diamond.
+ * Returns true if allowance >= MaxUint256 / 2 (practically infinite).
+ */
+export async function hasLiFiApproval(userAddress: string): Promise<boolean> {
+  try {
+    const usdc = usdcRead(readProvider());
+    const allowance: bigint = await usdc.allowance(userAddress, CONTRACT_ADDRESSES.LIFI_DIAMOND);
+    return allowance >= ethers.MaxUint256 / BigInt(2);
+  } catch (err) {
+    console.error("hasLiFiApproval:", err);
+    return false;
+  }
 }
 
 export async function depositToVault(
@@ -317,8 +378,7 @@ export async function depositToVault(
   const vault = new ethers.Contract(VAULT_ADDRESS, GOLDA_VAULT_ABI, signer);
   const owner = await signer.getAddress();
 
-  const dec = await usdcDecimals(usdc);
-  const amountWei = ethers.parseUnits(usdcAmount.toString(), dec);
+  const amountWei = ethers.parseUnits(usdcAmount.toString(), USDC_DECIMALS);
 
   const currentAllowance: bigint = await usdc.allowance(owner, VAULT_ADDRESS);
   if (currentAllowance < amountWei) {
@@ -336,8 +396,8 @@ export async function requestWithdrawFromVault(
   shareAmount: number
 ): Promise<TxResult> {
   const vault = new ethers.Contract(VAULT_ADDRESS, GOLDA_VAULT_ABI, signer);
-  // Shares share the same 6-dp scale as USDC (see SHARE_INIT in contract).
-  const amountWei = ethers.parseUnits(shareAmount.toString(), 6);
+  // Shares use 18 decimals
+  const amountWei = ethers.parseUnits(shareAmount.toString(), VAULT_SHARE_DECIMALS);
   const tx = await vault.requestWithdraw(amountWei);
   const receipt = await tx.wait();
   return { txHash: receipt.hash };

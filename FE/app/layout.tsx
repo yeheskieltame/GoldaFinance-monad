@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -7,12 +7,27 @@ const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
   display: "swap",
+  weight: ["400", "500", "600", "700"],
+});
+
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-display",
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["400", "500", "600", "700", "800"],
+});
+
+const jetbrains = JetBrains_Mono({
+  variable: "--font-mono",
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
   title: "GoldaFinance — Inflation-proof Savings on Monad",
   description:
-    "Deposit USDC, earn yield backed by gold (XAUt0 / PAXG) and BTC via LiFi routing on Monad.",
+    "Deposit USDC, earn yield backed by gold (XAUt0) and BTC via LiFi routing on Monad.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -42,7 +57,9 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>
-      <body className={`${inter.variable} antialiased`}>
+      <body
+        className={`${inter.variable} ${jakarta.variable} ${jetbrains.variable} antialiased font-sans`}
+      >
         <Providers>{children}</Providers>
       </body>
     </html>
