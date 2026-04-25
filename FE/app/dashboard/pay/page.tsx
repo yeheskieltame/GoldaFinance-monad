@@ -1,229 +1,178 @@
 'use client';
 
-import { useState, useRef, useEffect, Suspense, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { ethers } from 'ethers';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { usePrivy } from '@privy-io/react-auth';
 import { MobileLayout } from '@/components/mobile-layout';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { useGoldaVault } from '@/lib/hooks/useAureoContract';
-import { CONTRACT_ADDRESSES, CONTRACT_ABIS, EXPLORER_URL } from '@/lib/services/contractService';
 import {
     ArrowLeft,
-    QrCode,
-    Send,
-    Camera,
-    X,
-    Wallet,
-    Copy,
-    Check,
+    Layers,
+    TrendingUp,
+    Shield,
+    Power,
+    Save,
+    BarChart3,
+    CheckCircle2,
     AlertCircle,
     Loader2,
-    ChevronRight,
-    ExternalLink,
-    DollarSign,
+    Info,
+    ChevronDown,
+    ChevronUp,
 } from 'lucide-react';
-import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 
-type PayMode = 'scan' | 'send';
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface RecentRecipient {
-    address: string;
-    name?: string;
-    lastUsed: Date;
+interface DeFiProtocol {
+    id: string;
+    name: string;
+    icon: string;
+    description: string;
+    apy: string;
+    apyNum: number;
+    risk: 'low' | 'medium' | 'high';
+    tvl: string;
+    strategy: string;
+    color: string;
 }
 
-function PayPageContent() {
+type RebalanceFreq = 'daily' | 'weekly' | 'monthly';
+
+// ─── Static data ──────────────────────────────────────────────────────────────
+
+const PROTOCOLS: DeFiProtocol[] = [
+    {
+        id: 'apriori',
+        name: 'Apriori',
+        icon: '🔷',
+        description: 'Liquid MON staking. Earn native staking rewards while keeping liquidity via aprMON tokens.',
+        apy: '8.2%',
+        apyNum: 8.2,
+        risk: 'low',
+        tvl: '$4.2M',
+        strategy: 'MON → aprMON → staking yield',
+        color: 'var(--info)',
+    },
+    {
+        id: 'ambient',
+        name: 'Ambient Finance',
+        icon: '💧',
+        description: 'Concentrated liquidity AMM. Provide USDC-MON liquidity in targeted price ranges for enhanced yield.',
+        apy: '14.7%',
+        apyNum: 14.7,
+        risk: 'medium',
+        tvl: '$8.6M',
+        strategy: 'USDC + MON → LP → trading fees + incentives',
+        color: 'var(--warning)',
+    },
+    {
+        id: 'kuru',
+        name: 'Kuru Exchange',
+        icon: '⚡',
+        description: 'High-performance order-book DEX native to Monad. Automated market-making on gold and BTC pairs.',
+        apy: '22.5%',
+        apyNum: 22.5,
+        risk: 'high',
+        tvl: '$12.1M',
+        strategy: 'XAUt0/USDC & WBTC/USDC market-making',
+        color: 'var(--success)',
+    },
+];
+
+const RISK_LABEL: Record<string, { label: string; cls: string }> = {
+    low:    { label: 'Low Risk',    cls: 'bg-info-soft text-[var(--info)]' },
+    medium: { label: 'Medium Risk', cls: 'bg-warning-soft text-[var(--warning)]' },
+    high:   { label: 'High Risk',   cls: 'bg-success-soft text-[var(--success)]' },
+};
+
+const REBALANCE_OPTIONS: { id: RebalanceFreq; label: string }[] = [
+    { id: 'daily',   label: 'Daily' },
+    { id: 'weekly',  label: 'Weekly' },
+    { id: 'monthly', label: 'Monthly' },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function DeFiAgentPage() {
     const router = useRouter();
-    const searchParams = useSearchParams();
-    const { user, ready, authenticated } = usePrivy();
-    const { wallets } = useWallets();
-    const { balances, fetchBalances } = useGoldaVault();
-
-    const [mode, setMode] = useState<PayMode>((searchParams.get('mode') as PayMode) || 'send');
-    const [amount, setAmount] = useState('');
-    const [recipientAddress, setRecipientAddress] = useState('');
-    const [isScanning, setIsScanning] = useState(false);
-    const [isSending, setIsSending] = useState(false);
-    const [copied, setCopied] = useState(false);
-    const [error, setError] = useState('');
-    const [txHash, setTxHash] = useState<string | null>(null);
-    const [recentRecipients, setRecentRecipients] = useState<RecentRecipient[]>([]);
-    const [scanSuccess, setScanSuccess] = useState(false);
-
-    const streamRef = useRef<MediaStream | null>(null);
-    const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-
-    useEffect(() => {
-        const saved = localStorage.getItem('golda_recent_recipients');
-        if (saved) {
-            try {
-                setRecentRecipients(JSON.parse(saved));
-            } catch { /* ignore */ }
-        }
-    }, []);
+    const { ready, authenticated } = usePrivy();
 
     useEffect(() => {
         if (ready && !authenticated) router.push('/');
     }, [ready, authenticated, router]);
 
-    useEffect(() => {
-        return () => {
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(t => t.stop());
+    const [allocations, setAllocations] = useState<Record<string, number>>({
+        apriori: 40,
+        ambient: 35,
+        kuru:    25,
+    });
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [agentEnabled, setAgentEnabled] = useState(false);
+    const [autoCompound, setAutoCompound] = useState(true);
+    const [rebalanceFreq, setRebalanceFreq] = useState<RebalanceFreq>('weekly');
+    const [minRebalance, setMinRebalance] = useState(5);
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+
+    const totalAlloc = Object.values(allocations).reduce((s, v) => s + v, 0);
+    const allocValid = totalAlloc === 100;
+
+    // Keep allocations summing to 100 by scaling the other two when one slider moves
+    function handleSlider(id: string, value: number) {
+        setAllocations(prev => {
+            const others = Object.entries(prev).filter(([k]) => k !== id);
+            const othersTarget = 100 - value;
+            const othersTotal = others.reduce((s, [, v]) => s + v, 0);
+
+            const updated: Record<string, number> = { [id]: value };
+            if (othersTotal === 0) {
+                const even = Math.floor(othersTarget / others.length);
+                others.forEach(([k], i) => {
+                    updated[k] = i === others.length - 1 ? othersTarget - even * (others.length - 1) : even;
+                });
+            } else {
+                const scale = othersTarget / othersTotal;
+                let remaining = othersTarget;
+                others.forEach(([k, v], i) => {
+                    const newVal = i === others.length - 1 ? remaining : Math.round(v * scale);
+                    updated[k] = Math.max(0, newVal);
+                    remaining -= updated[k];
+                });
             }
-        };
-    }, []);
+            return updated;
+        });
+    }
 
-    const extractEvmAddress = useCallback((text: string): string | null => {
-        const direct = text.match(/^(0x[a-fA-F0-9]{40})$/);
-        if (direct) return direct[1];
-        const eth = text.match(/ethereum:(0x[a-fA-F0-9]{40})/i);
-        if (eth) return eth[1];
-        const anyAddr = text.match(/0x[a-fA-F0-9]{40}/);
-        if (anyAddr) return anyAddr[0];
-        return null;
-    }, []);
-
-    const onScanSuccess = useCallback((decodedText: string) => {
-        const address = extractEvmAddress(decodedText);
-        if (address && ethers.isAddress(address)) {
-            setRecipientAddress(address);
-            setScanSuccess(true);
-            setError('');
-            if (scannerRef.current) {
-                scannerRef.current.clear().catch(console.error);
-                scannerRef.current = null;
-            }
-            setIsScanning(false);
-            setMode('send');
-            setTimeout(() => setScanSuccess(false), 2000);
-        } else {
-            setError('Invalid wallet address in QR code');
-        }
-    }, [extractEvmAddress]);
-
-    const startScanning = useCallback(async () => {
-        setIsScanning(true);
-        setError('');
-        setScanSuccess(false);
-
-        setTimeout(() => {
-            try {
-                const scanner = new Html5QrcodeScanner(
-                    'qr-reader',
-                    {
-                        fps: 10,
-                        qrbox: { width: 250, height: 250 },
-                        aspectRatio: 1,
-                        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-                        rememberLastUsedCamera: true,
-                    },
-                    false
-                );
-                scanner.render(
-                    (decodedText) => onScanSuccess(decodedText),
-                    () => { /* ignore scan errors */ }
-                );
-                scannerRef.current = scanner;
-            } catch (err) {
-                console.error('Failed to start scanner:', err);
-                setError('Unable to start camera. Please grant camera permissions.');
-                setIsScanning(false);
-            }
-        }, 100);
-    }, [onScanSuccess]);
-
-    const stopScanning = useCallback(() => {
-        if (scannerRef.current) {
-            scannerRef.current.clear().catch(console.error);
-            scannerRef.current = null;
-        }
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(t => t.stop());
-            streamRef.current = null;
-        }
-        setIsScanning(false);
-    }, []);
-
-    const saveRecentRecipient = (address: string) => {
-        const existing = recentRecipients.filter(r => r.address.toLowerCase() !== address.toLowerCase());
-        const updated: RecentRecipient[] = [
-            { address, lastUsed: new Date() },
-            ...existing.slice(0, 4),
-        ];
-        setRecentRecipients(updated);
-        localStorage.setItem('golda_recent_recipients', JSON.stringify(updated));
-    };
-
-    const handleSend = async () => {
-        if (!recipientAddress || !amount) {
-            setError('Please enter recipient address and amount');
-            return;
-        }
-        if (!ethers.isAddress(recipientAddress)) {
-            setError('Invalid EVM wallet address');
-            return;
-        }
-        const numAmount = parseFloat(amount);
-        if (isNaN(numAmount) || numAmount <= 0) {
-            setError('Please enter a valid amount');
-            return;
-        }
-        if (numAmount > balances.usdc) {
-            setError(`Insufficient balance. You have $${balances.usdc.toFixed(2)} USDC`);
-            return;
-        }
-        if (recipientAddress.toLowerCase() === user?.wallet?.address?.toLowerCase()) {
-            setError('Cannot send to your own address');
-            return;
-        }
-
-        setIsSending(true);
-        setError('');
-        setTxHash(null);
-
+    async function handleSave() {
+        if (!allocValid) return;
+        setIsSaving(true);
+        setSaveStatus('idle');
         try {
-            const activeWallet = wallets.find(w => w.walletClientType === 'privy') || wallets[0];
-            if (!activeWallet) throw new Error('No wallet connected');
-
-            const provider = await activeWallet.getEthereumProvider();
-            const ethersProvider = new ethers.BrowserProvider(provider);
-            const signer = await ethersProvider.getSigner();
-
-            const usdc = new ethers.Contract(CONTRACT_ADDRESSES.USDC, CONTRACT_ABIS.USDC, signer);
-            const decimals = Number(await usdc.decimals().catch(() => 6));
-            const amountInWei = ethers.parseUnits(numAmount.toString(), decimals);
-
-            const tx = await usdc.transfer(recipientAddress, amountInWei);
-            const receipt = await tx.wait();
-
-            setTxHash(receipt.hash);
-            saveRecentRecipient(recipientAddress);
-            await fetchBalances();
-
-            router.push(`/dashboard/pay/success?amount=${amount}&to=${recipientAddress}&tx=${receipt.hash}`);
-        } catch (err: unknown) {
-            console.error('Transfer error:', err);
-            const msg = err instanceof Error ? err.message : 'Transaction failed';
-            if (msg.includes('user rejected')) setError('Transaction was rejected');
-            else if (msg.includes('insufficient')) setError('Insufficient balance for transaction');
-            else setError('Transaction failed. Please try again.');
+            const config = { allocations, autoCompound, rebalanceFreq, minRebalance, enabled: agentEnabled };
+            localStorage.setItem('defi_agent_config', JSON.stringify(config));
+            await new Promise(r => setTimeout(r, 700));
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 3000);
+        } catch {
+            setSaveStatus('error');
         } finally {
-            setIsSending(false);
+            setIsSaving(false);
         }
-    };
+    }
 
-    const copyAddress = async () => {
-        if (user?.wallet?.address) {
-            await navigator.clipboard.writeText(user.wallet.address);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        }
-    };
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem('defi_agent_config');
+            if (!raw) return;
+            const cfg = JSON.parse(raw);
+            if (cfg.allocations) setAllocations(cfg.allocations);
+            if (typeof cfg.autoCompound === 'boolean') setAutoCompound(cfg.autoCompound);
+            if (cfg.rebalanceFreq) setRebalanceFreq(cfg.rebalanceFreq);
+            if (typeof cfg.minRebalance === 'number') setMinRebalance(cfg.minRebalance);
+            if (typeof cfg.enabled === 'boolean') setAgentEnabled(cfg.enabled);
+        } catch { /* ignore */ }
+    }, []);
 
-    const quickAmounts = [10, 25, 50, 100];
+    const blendedApy = PROTOCOLS.reduce((sum, p) => sum + p.apyNum * (allocations[p.id] / 100), 0);
 
     if (!ready || !authenticated) {
         return (
@@ -234,289 +183,275 @@ function PayPageContent() {
     }
 
     return (
-        <MobileLayout activeTab="pay" showNav={!isScanning}>
-            {isScanning && (
-                <div className="fixed inset-0 z-50 bg-black flex flex-col">
-                    <div className="flex items-center justify-between p-4 bg-black/80">
-                        <button onClick={stopScanning} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors">
-                            <X className="w-6 h-6 text-white" />
-                        </button>
-                        <span className="text-white font-medium">Scan Wallet QR Code</span>
-                        <div className="w-10" />
-                    </div>
-                    <div className="flex-1 flex flex-col items-center justify-center p-4">
-                        <div id="qr-reader" className="w-full max-w-sm rounded-2xl overflow-hidden" style={{ background: '#000' }} />
-                        {scanSuccess && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-                                <div className="bg-[var(--success)] rounded-full p-6 animate-bounce">
-                                    <Check className="w-16 h-16 text-white" />
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <div className="p-6 text-center bg-black/80">
-                        <p className="text-white/70 text-sm">Scan any EVM wallet QR code to auto-fill the address</p>
-                        {error && (
-                            <div className="mt-4 flex items-center justify-center gap-2 text-[var(--destructive)]">
-                                <AlertCircle className="w-4 h-4" />
-                                <span className="text-sm">{error}</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            <div className="vault-card ink !rounded-none !rounded-b-2xl px-4 pt-12 pb-8 !min-h-0">
-                <div className="relative z-10 flex items-center gap-4 mb-6">
+        <MobileLayout activeTab="pay">
+            {/* Header */}
+            <div className="bg-background sticky top-0 z-40 px-4 pt-12 pb-4 border-b border-border">
+                <div className="flex items-center gap-3">
                     <button
                         onClick={() => router.push('/dashboard')}
-                        className="btn-haptic p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-                        aria-label="Back"
+                        className="p-2 rounded-full bg-muted hover:bg-secondary transition-colors"
                     >
                         <ArrowLeft className="w-5 h-5" />
                     </button>
-                    <h1 className="text-title-2">Pay USDC</h1>
-                </div>
-
-                <div className="relative z-10 bg-white/10 rounded-2xl p-4 mb-4">
-                    <p className="text-caption uppercase tracking-wider text-white/65">
-                        Available USDC
-                    </p>
-                    <p className="text-large-title font-num">
-                        ${balances.usdc.toFixed(2)}
-                    </p>
-                </div>
-
-                <div className="relative z-10 flex gap-2 bg-white/10 rounded-2xl p-1">
-                    <button
-                        onClick={() => setMode('scan')}
-                        className={`btn-haptic flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-colors ${
-                            mode === 'scan'
-                                ? 'bg-white text-foreground'
-                                : 'text-white/80 hover:text-white'
-                        }`}
-                    >
-                        <QrCode className="w-5 h-5" />
-                        Scan QR
-                    </button>
-                    <button
-                        onClick={() => setMode('send')}
-                        className={`btn-haptic flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-semibold transition-colors ${
-                            mode === 'send'
-                                ? 'bg-white text-foreground'
-                                : 'text-white/80 hover:text-white'
-                        }`}
-                    >
-                        <Send className="w-5 h-5" />
-                        Transfer
-                    </button>
+                    <div className="flex-1">
+                        <h1 className="text-xl font-semibold flex items-center gap-2">
+                            <Layers className="w-5 h-5 text-primary" />
+                            DeFi Agent
+                        </h1>
+                        <p className="text-xs text-muted-foreground">Multi-protocol yield automation on Monad</p>
+                    </div>
+                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+                        agentEnabled ? 'bg-success-soft text-[var(--success)]' : 'bg-muted text-muted-foreground'
+                    }`}>
+                        <span className={`w-2 h-2 rounded-full ${agentEnabled ? 'bg-[var(--success)] animate-pulse' : 'bg-muted-foreground'}`} />
+                        {agentEnabled ? 'Active' : 'Inactive'}
+                    </div>
                 </div>
             </div>
 
-            <div className="p-4 space-y-6 animate-fade-in">
-                {mode === 'scan' ? (
-                    <>
-                        <div className="ios-card-elev p-6">
-                            <div className="text-center space-y-4">
-                                <div className="w-20 h-20 mx-auto bg-foreground text-background rounded-2xl flex items-center justify-center">
-                                    <Camera className="w-10 h-10" />
-                                </div>
-                                <div>
-                                    <h3 className="text-title-3">Scan to Pay</h3>
-                                    <p className="text-footnote text-muted-foreground mt-1">
-                                        Scan any EVM wallet QR code to send USDC instantly
-                                    </p>
-                                </div>
-                                <Button
-                                    onClick={startScanning}
-                                    className="action-pill primary w-full !h-14"
-                                >
-                                    <Camera className="w-5 h-5 mr-2" />
-                                    Open Scanner
-                                </Button>
-                            </div>
-                        </div>
+            <div className="px-4 py-4 space-y-4 pb-28">
 
-                        <div className="ios-card-elev p-6">
-                            <h3 className="text-headline mb-4">Receive Payment</h3>
-                            <div className="bg-muted rounded-xl p-4">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-caption uppercase tracking-wider text-muted-foreground">
-                                            Your Address
-                                        </p>
-                                        <p className="font-mono text-subhead mt-1">
-                                            {user?.wallet?.address
-                                                ? `${user.wallet.address.slice(0, 10)}...${user.wallet.address.slice(-8)}`
-                                                : 'Not connected'}
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={copyAddress}
-                                        className="btn-haptic p-3 rounded-xl bg-background hover:bg-surface transition-colors"
-                                        aria-label="Copy address"
-                                    >
-                                        {copied ? (
-                                            <Check className="w-5 h-5 text-[var(--success)]" />
-                                        ) : (
-                                            <Copy className="w-5 h-5 text-muted-foreground" />
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
+                {/* Blended yield banner */}
+                <div className="ios-card p-4 bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-xs text-muted-foreground mb-1">Blended Est. APY</p>
+                            <p className="text-3xl font-bold text-primary">{blendedApy.toFixed(1)}%</p>
+                            <p className="text-xs text-muted-foreground mt-1">Weighted by your allocation</p>
                         </div>
-                    </>
-                ) : (
-                    <>
-                        <div className="ios-card-elev p-6 space-y-6">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Recipient Address</label>
-                                <div className="relative">
-                                    <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                    <Input
-                                        value={recipientAddress}
-                                        onChange={(e) => { setRecipientAddress(e.target.value); setError(''); }}
-                                        placeholder="0x..."
-                                        className="pl-12 py-6 text-base rounded-xl font-mono"
-                                        disabled={isSending}
-                                    />
+                        <div className="text-right">
+                            <BarChart3 className="w-10 h-10 text-primary/40 ml-auto mb-1" />
+                            <p className="text-xs text-muted-foreground">3 protocols</p>
+                            <p className="text-xs text-muted-foreground">Monad Mainnet</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Protocol allocation cards */}
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-base font-semibold">Protocol Allocation</h2>
+                        <span className={`text-sm font-medium ${allocValid ? 'text-[var(--success)]' : 'text-[var(--destructive)]'}`}>
+                            {totalAlloc}% / 100%
+                        </span>
+                    </div>
+
+                    <div className="space-y-3">
+                        {PROTOCOLS.map((protocol) => {
+                            const risk = RISK_LABEL[protocol.risk];
+                            const alloc = allocations[protocol.id] ?? 0;
+
+                            return (
+                                <div key={protocol.id} className="ios-card p-4 space-y-3">
+                                    <div className="flex items-start gap-3">
+                                        <span className="text-2xl">{protocol.icon}</span>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <h3 className="font-semibold">{protocol.name}</h3>
+                                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${risk.cls}`}>
+                                                    {risk.label}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                                                {protocol.description}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3 text-center">
+                                        <div className="flex-1 bg-muted rounded-lg p-2">
+                                            <p className="text-xs text-muted-foreground">Est. APY</p>
+                                            <p className="font-bold" style={{ color: protocol.color }}>{protocol.apy}</p>
+                                        </div>
+                                        <div className="flex-1 bg-muted rounded-lg p-2">
+                                            <p className="text-xs text-muted-foreground">TVL</p>
+                                            <p className="font-bold text-foreground">{protocol.tvl}</p>
+                                        </div>
+                                        <div className="flex-1 bg-muted rounded-lg p-2">
+                                            <p className="text-xs text-muted-foreground">Target</p>
+                                            <p className="font-bold text-primary">{alloc}%</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                                        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                        <span>{protocol.strategy}</span>
+                                    </div>
+
+                                    {/* Allocation slider */}
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-xs text-muted-foreground">
+                                            <span>Drag to adjust</span>
+                                            <span className="font-medium text-foreground">{alloc}%</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={0}
+                                            max={100}
+                                            value={alloc}
+                                            onChange={e => handleSlider(protocol.id, Number(e.target.value))}
+                                            className="w-full accent-primary h-2 rounded-full cursor-pointer"
+                                        />
+                                    </div>
+
+                                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full rounded-full transition-all duration-200"
+                                            style={{ width: `${alloc}%`, backgroundColor: protocol.color }}
+                                        />
+                                    </div>
                                 </div>
+                            );
+                        })}
+                    </div>
+
+                    {!allocValid && (
+                        <div className="mt-2 flex items-center gap-2 text-xs text-[var(--destructive)]">
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                            Allocations must total exactly 100%
+                        </div>
+                    )}
+                </div>
+
+                {/* Agent toggle */}
+                <div className="ios-card p-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                                agentEnabled ? 'bg-success-soft' : 'bg-muted'
+                            }`}>
+                                <Power className={`w-5 h-5 ${agentEnabled ? 'text-[var(--success)]' : 'text-muted-foreground'}`} />
+                            </div>
+                            <div>
+                                <p className="font-semibold">DeFi Agent</p>
                                 <p className="text-xs text-muted-foreground">
-                                    Enter any EVM wallet address (Monad Mainnet)
+                                    {agentEnabled ? 'Autonomously managing positions' : 'Enable automated rebalancing'}
                                 </p>
                             </div>
+                        </div>
+                        <button
+                            onClick={() => setAgentEnabled(v => !v)}
+                            className={`relative w-12 h-6 rounded-full transition-colors ${
+                                agentEnabled ? 'bg-[var(--success)]' : 'bg-muted-foreground/30'
+                            }`}
+                            aria-label="Toggle DeFi agent"
+                        >
+                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                                agentEnabled ? 'translate-x-6' : ''
+                            }`} />
+                        </button>
+                    </div>
+                </div>
 
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-sm font-medium">Amount (USDC)</label>
-                                    <span className="text-xs text-muted-foreground">
-                                        Balance: ${balances.usdc.toFixed(2)}
-                                    </span>
-                                </div>
-                                <div className="relative">
-                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-medium text-muted-foreground px-1">
-                                        <DollarSign className="w-5 h-5" />
-                                    </span>
-                                    <Input
-                                        type="number"
-                                        value={amount}
-                                        onChange={(e) => { setAmount(e.target.value); setError(''); }}
-                                        placeholder="0.00"
-                                        className="pl-12 py-6 text-2xl font-semibold rounded-xl"
-                                        disabled={isSending}
-                                    />
-                                </div>
+                {/* Advanced settings */}
+                <div className="ios-card overflow-hidden">
+                    <button
+                        onClick={() => setSettingsOpen(v => !v)}
+                        className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
+                    >
+                        <div className="flex items-center gap-2">
+                            <Shield className="w-4 h-4 text-muted-foreground" />
+                            <span className="font-medium">Agent Settings</span>
+                        </div>
+                        {settingsOpen
+                            ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                            : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                    </button>
 
-                                <div className="flex gap-2 pt-2">
-                                    {quickAmounts.map((amt) => (
+                    {settingsOpen && (
+                        <div className="px-4 pb-4 space-y-5 border-t border-border pt-4">
+                            {/* Auto-compound */}
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-medium">Auto-compound Rewards</p>
+                                    <p className="text-xs text-muted-foreground">Reinvest yield automatically</p>
+                                </div>
+                                <button
+                                    onClick={() => setAutoCompound(v => !v)}
+                                    className={`relative w-10 h-5 rounded-full transition-colors ${
+                                        autoCompound ? 'bg-primary' : 'bg-muted-foreground/30'
+                                    }`}
+                                >
+                                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                                        autoCompound ? 'translate-x-5' : ''
+                                    }`} />
+                                </button>
+                            </div>
+
+                            {/* Rebalance frequency */}
+                            <div>
+                                <p className="text-sm font-medium mb-2">Rebalance Frequency</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {REBALANCE_OPTIONS.map(opt => (
                                         <button
-                                            key={amt}
-                                            onClick={() => setAmount(amt.toString())}
-                                            disabled={amt > balances.usdc || isSending}
-                                            className={`btn-haptic flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                                amount === amt.toString()
-                                                    ? 'bg-foreground text-background'
-                                                    : 'bg-surface hover:bg-surface-2 text-foreground'
-                                            } ${amt > balances.usdc ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            key={opt.id}
+                                            onClick={() => setRebalanceFreq(opt.id)}
+                                            className={`py-2 rounded-lg text-sm font-medium transition-colors ${
+                                                rebalanceFreq === opt.id
+                                                    ? 'bg-primary text-white'
+                                                    : 'bg-muted text-foreground hover:bg-secondary'
+                                            }`}
                                         >
-                                            ${amt}
+                                            {opt.label}
                                         </button>
                                     ))}
                                 </div>
                             </div>
 
-                            {error && (
-                                <div className="flex items-center gap-2 text-[var(--destructive)] text-sm bg-destructive-soft p-3 rounded-xl">
-                                    <AlertCircle className="w-4 h-4 shrink-0" />
-                                    {error}
+                            {/* Min drift */}
+                            <div>
+                                <div className="flex justify-between text-sm mb-2">
+                                    <span className="font-medium">Min. Drift to Rebalance</span>
+                                    <span className="text-primary font-semibold">{minRebalance}%</span>
                                 </div>
-                            )}
-
-                            {txHash && (
-                                <div className="flex items-center gap-2 text-[var(--success)] text-sm bg-success-soft p-3 rounded-xl">
-                                    <Check className="w-4 h-4 shrink-0" />
-                                    <span>Sent!</span>
-                                    <a
-                                        href={`${EXPLORER_URL}/tx/${txHash}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-1 underline"
-                                    >
-                                        View <ExternalLink className="w-3 h-3" />
-                                    </a>
-                                </div>
-                            )}
-
-                            <Button
-                                onClick={handleSend}
-                                disabled={isSending || !amount || !recipientAddress}
-                                className="action-pill primary w-full !h-14 disabled:opacity-50"
-                            >
-                                {isSending ? (
-                                    <>
-                                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                                        Sending...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Send className="w-5 h-5 mr-2" />
-                                        Send USDC
-                                    </>
-                                )}
-                            </Button>
-                        </div>
-
-                        {recentRecipients.length > 0 && (
-                            <div className="ios-card p-4">
-                                <h3 className="text-headline mb-3 px-2">Recent</h3>
-                                <div className="space-y-1">
-                                    {recentRecipients.map((recipient, i) => (
-                                        <button
-                                            key={i}
-                                            onClick={() => setRecipientAddress(recipient.address)}
-                                            className="btn-haptic w-full flex items-center justify-between p-3 rounded-xl hover:bg-surface transition-colors"
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-foreground text-background flex items-center justify-center text-subhead font-semibold">
-                                                    {recipient.address
-                                                        .slice(2, 4)
-                                                        .toUpperCase()}
-                                                </div>
-                                                <div className="text-left">
-                                                    <p className="font-mono text-subhead">
-                                                        {recipient.address.slice(0, 6)}…
-                                                        {recipient.address.slice(-4)}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                                        </button>
-                                    ))}
-                                </div>
+                                <input
+                                    type="range"
+                                    min={1}
+                                    max={20}
+                                    value={minRebalance}
+                                    onChange={e => setMinRebalance(Number(e.target.value))}
+                                    className="w-full accent-primary h-2 rounded-full cursor-pointer"
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Rebalance only when drift ≥ {minRebalance}% from target
+                                </p>
                             </div>
-                        )}
-
-                        <div className="ios-card p-3 text-center text-footnote text-muted-foreground">
-                            Sending on{' '}
-                            <span className="font-semibold text-foreground">
-                                Monad Mainnet
-                            </span>
                         </div>
-                    </>
-                )}
+                    )}
+                </div>
+
+                {/* Save button */}
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving || !allocValid}
+                    className="w-full py-4 rounded-2xl font-semibold text-base flex items-center justify-center gap-2 bg-primary text-white disabled:opacity-50 transition-all active:scale-[0.98]"
+                >
+                    {isSaving ? (
+                        <><Loader2 className="w-5 h-5 animate-spin" /> Saving…</>
+                    ) : saveStatus === 'saved' ? (
+                        <><CheckCircle2 className="w-5 h-5" /> Configuration Saved</>
+                    ) : saveStatus === 'error' ? (
+                        <><AlertCircle className="w-5 h-5" /> Save Failed — Retry</>
+                    ) : (
+                        <><Save className="w-5 h-5" /> {agentEnabled ? 'Save & Activate Agent' : 'Save Configuration'}</>
+                    )}
+                </button>
+
+                {/* About section */}
+                <div className="ios-card p-4 space-y-2">
+                    <div className="flex items-center gap-2 mb-1">
+                        <TrendingUp className="w-4 h-4 text-muted-foreground" />
+                        <p className="text-sm font-semibold">How DeFi Agent Works</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                        The DeFi Agent monitors your target allocations and automatically rebalances your positions across Apriori, Ambient Finance, and Kuru Exchange on Monad.
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                        Set your desired split, enable the agent, and it routes your USDC to maximize yield while respecting your risk profile. All transactions settle on Monad with ~1s finality.
+                    </p>
+                </div>
+
             </div>
         </MobileLayout>
-    );
-}
-
-export default function PayPage() {
-    return (
-        <Suspense fallback={
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
-            </div>
-        }>
-            <PayPageContent />
-        </Suspense>
     );
 }

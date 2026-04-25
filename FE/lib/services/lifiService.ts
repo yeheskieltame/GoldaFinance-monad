@@ -348,20 +348,28 @@ export async function executeMonadSwap(
     }
   }
 
-  // 2. Send the LiFi transaction
+  // 2. Send the LiFi transaction — pass txRequest directly so ethers handles
+  //    gas field normalisation (EIP-1559 vs legacy, hex → bigint, etc.)
   const tx = await signer.sendTransaction({
-    to: txRequest.to,
-    data: txRequest.data,
-    value: txRequest.value ? BigInt(txRequest.value) : undefined,
-    gasLimit: txRequest.gasLimit ? BigInt(txRequest.gasLimit) : undefined,
-    gasPrice: txRequest.gasPrice ? BigInt(txRequest.gasPrice) : undefined,
+    to:       txRequest.to,
+    data:     txRequest.data,
+    value:    txRequest.value    !== undefined ? BigInt(txRequest.value)    : undefined,
+    gasLimit: txRequest.gasLimit !== undefined ? BigInt(txRequest.gasLimit) : undefined,
+    // Prefer EIP-1559 fields; fall back to legacy gasPrice
+    ...(txRequest.maxFeePerGas
+      ? {
+          maxFeePerGas:         BigInt(txRequest.maxFeePerGas),
+          maxPriorityFeePerGas: txRequest.maxPriorityFeePerGas
+            ? BigInt(txRequest.maxPriorityFeePerGas)
+            : BigInt(txRequest.maxFeePerGas),
+        }
+      : txRequest.gasPrice
+        ? { gasPrice: BigInt(txRequest.gasPrice) }
+        : {}),
   });
 
-  console.log('[LiFi] swap tx sent:', tx.hash);
-
-  // 3. Wait for 1 confirmation
   const receipt = await tx.wait(1);
-  console.log('[LiFi] swap tx confirmed in block:', receipt?.blockNumber);
+  console.log('[LiFi] swap confirmed block:', receipt?.blockNumber);
 
   return { txHash: tx.hash };
 }
@@ -586,20 +594,27 @@ export async function agentAutoSwap(params: {
     throw new Error('No transaction request in quote — cannot execute auto-swap');
   }
 
-  // 2. Send the LiFi transaction (approval should already be infinite)
+  // 2. Send — approval is already infinite (granted by approveUSDCToLiFi)
   const tx = await params.signer.sendTransaction({
-    to: txRequest.to,
-    data: txRequest.data,
-    value: txRequest.value ? BigInt(txRequest.value) : undefined,
-    gasLimit: txRequest.gasLimit ? BigInt(txRequest.gasLimit) : undefined,
-    gasPrice: txRequest.gasPrice ? BigInt(txRequest.gasPrice) : undefined,
+    to:       txRequest.to,
+    data:     txRequest.data,
+    value:    txRequest.value    !== undefined ? BigInt(txRequest.value)    : undefined,
+    gasLimit: txRequest.gasLimit !== undefined ? BigInt(txRequest.gasLimit) : undefined,
+    ...(txRequest.maxFeePerGas
+      ? {
+          maxFeePerGas:         BigInt(txRequest.maxFeePerGas),
+          maxPriorityFeePerGas: txRequest.maxPriorityFeePerGas
+            ? BigInt(txRequest.maxPriorityFeePerGas)
+            : BigInt(txRequest.maxFeePerGas),
+        }
+      : txRequest.gasPrice
+        ? { gasPrice: BigInt(txRequest.gasPrice) }
+        : {}),
   });
 
-  console.log('[LiFi Agent] auto-swap tx sent:', tx.hash);
-
-  // 3. Wait for 1 confirmation
+  // 3. Wait for confirmation
   const receipt = await tx.wait(1);
-  console.log('[LiFi Agent] auto-swap confirmed in block:', receipt?.blockNumber);
+  console.log('[LiFi Agent] auto-swap confirmed block:', receipt?.blockNumber);
 
   const estimatedOutput = Number(
     ethers.formatUnits(step.estimate.toAmount, target.decimals)

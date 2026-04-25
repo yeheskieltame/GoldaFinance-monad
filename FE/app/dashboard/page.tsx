@@ -232,6 +232,26 @@ export default function DashboardPage() {
                     {walletAddress && <p>You: {walletAddress}</p>}
                 </div>
             </div>
+
+            <div className="ios-card-elev p-5">
+                <p className="section-label mb-3">Your Assets</p>
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-yellow-500">🥇</span>
+                            <span className="text-subhead">XAUt0</span>
+                        </div>
+                        <span className="text-title-3 font-num">{balances.xaut.toFixed(6)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-orange-500">₿</span>
+                            <span className="text-subhead">WBTC</span>
+                        </div>
+                        <span className="text-title-3 font-num">{balances.wbtc.toFixed(8)}</span>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 
@@ -385,6 +405,42 @@ export default function DashboardPage() {
                         <p className="text-footnote text-muted-foreground">
                             Liquid cash
                         </p>
+                    </div>
+                </div>
+
+                {/* Asset Balances — XAUT & WBTC */}
+                <div className="ios-card-elev p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <h3 className="text-headline">Your Assets</h3>
+                            <p className="text-footnote text-muted-foreground">
+                                Direct wallet balances on Monad
+                            </p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="ios-card p-3 bg-gradient-to-br from-yellow-500/10 to-amber-500/5">
+                            <p className="section-label mb-1 flex items-center gap-1">
+                                <span className="text-yellow-500">🥇</span> XAUt0
+                            </p>
+                            <p className="text-title-2 font-num">
+                                {balances.xaut.toFixed(6)}
+                            </p>
+                            <p className="text-footnote text-muted-foreground">
+                                Tether Gold
+                            </p>
+                        </div>
+                        <div className="ios-card p-3 bg-gradient-to-br from-orange-500/10 to-red-500/5">
+                            <p className="section-label mb-1 flex items-center gap-1">
+                                <span className="text-orange-500">₿</span> WBTC
+                            </p>
+                            <p className="text-title-2 font-num">
+                                {balances.wbtc.toFixed(8)}
+                            </p>
+                            <p className="text-footnote text-muted-foreground">
+                                Wrapped Bitcoin
+                            </p>
+                        </div>
                     </div>
                 </div>
 

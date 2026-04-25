@@ -270,17 +270,24 @@ export interface UserBalances {
   navUSDC: number;
   shareValueUSDC: number;
   usdcAllowance: number;
+  xaut: number;
+  wbtc: number;
 }
 
 export async function getUserBalances(
   userAddress: string
 ): Promise<UserBalances> {
-  const [usdc, shares, sharePrice, navUSDC, usdcAllowance] = await Promise.all([
+  const xautAsset = SUPPORTED_ASSETS.find(a => a.id === 'XAUT');
+  const wbtcAsset = SUPPORTED_ASSETS.find(a => a.id === 'WBTC');
+
+  const [usdc, shares, sharePrice, navUSDC, usdcAllowance, xaut, wbtc] = await Promise.all([
     getUSDCBalance(userAddress),
     getShareBalance(userAddress),
     getSharePrice(),
     getNAV(),
     getUSDCAllowance(userAddress),
+    xautAsset ? getTokenBalance(xautAsset.address, userAddress, xautAsset.decimals) : Promise.resolve(0),
+    wbtcAsset ? getTokenBalance(wbtcAsset.address, userAddress, wbtcAsset.decimals) : Promise.resolve(0),
   ]);
 
   return {
@@ -290,6 +297,8 @@ export async function getUserBalances(
     navUSDC,
     shareValueUSDC: shares * sharePrice,
     usdcAllowance,
+    xaut,
+    wbtc,
   };
 }
 

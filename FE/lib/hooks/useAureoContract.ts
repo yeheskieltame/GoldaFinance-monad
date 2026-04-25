@@ -30,6 +30,8 @@ export interface VaultBalances {
     navUSDC: number;
     shareValueUSDC: number;
     usdcAllowance: number;
+    xaut: number;
+    wbtc: number;
 }
 
 export interface TransactionResult {
@@ -53,6 +55,8 @@ export function useGoldaVault() {
         navUSDC: 0,
         shareValueUSDC: 0,
         usdcAllowance: 0,
+        xaut: 0,
+        wbtc: 0,
     });
     const [withdrawals, setWithdrawals] = useState<WithdrawalView[]>([]);
     const [isLoading, setIsLoading] = useState(false);

@@ -14,6 +14,8 @@ export interface VaultBalances {
   navUSDC: number;
   shareValueUSDC: number;
   usdcAllowance: number;
+  xaut: number;
+  wbtc: number;
 }
 
 export interface TransactionResult {

@@ -22,11 +22,9 @@ import {
   MONAD_CHAIN_ID,
   getMonadSwapQuote,
   executeMonadSwap,
-  checkSwapStatus,
   buildLifiSwapLink,
   type SwapQuote,
   type SwapStatus,
-  type MonadTokenSymbol,
 } from '@/lib/services/lifiService';
 import { addSwapRecord } from '@/lib/services/swapHistory';
 import { ethers } from 'ethers';
@@ -195,9 +193,10 @@ export default function SwapPage() {
       const result = await executeMonadSwap(signer, quote);
 
       setTxHash(result.txHash);
-      setSwapStatus({ status: 'PENDING', txHash: result.txHash });
+      // tx.wait(1) already returned inside executeMonadSwap — swap is final
+      setSwapStatus({ status: 'DONE', txHash: result.txHash });
 
-      // Record the swap in local history
+      // Record in local swap history (LiFi swaps bypass the vault contract)
       addSwapRecord({
         id: `swap-${Date.now()}`,
         fromToken: fromToken,
@@ -213,15 +212,6 @@ export default function SwapPage() {
         timestamp: Date.now(),
         status: 'completed',
       });
-
-      // Poll status
-      const finalStatus = await checkSwapStatus({
-        txHash: result.txHash,
-        fromChainId: MONAD_CHAIN_ID,
-        toChainId: MONAD_CHAIN_ID,
-      });
-
-      setSwapStatus(finalStatus);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Swap failed';
       setError(msg);

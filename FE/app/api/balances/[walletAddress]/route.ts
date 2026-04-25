@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserBalances } from '@/lib/services/contractService';
+import { getUserBalances, SUPPORTED_ASSETS } from '@/lib/services/contractService';
 
 export async function GET(
   _req: NextRequest,
@@ -12,6 +12,10 @@ export async function GET(
     return NextResponse.json({
       success: true,
       balances,
+      assets: {
+        XAUT: SUPPORTED_ASSETS.find(a => a.id === 'XAUT'),
+        WBTC: SUPPORTED_ASSETS.find(a => a.id === 'WBTC'),
+      },
     });
   } catch (error) {
     console.error('Balances API Error:', error);
