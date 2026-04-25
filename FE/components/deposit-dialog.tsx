@@ -30,7 +30,6 @@ interface DepositDialogProps {
 }
 
 const ASSET_OPTIONS: { id: SavingsAssetId; label: string; desc: string }[] = [
-  { id: 'PAXG', label: 'PAXG', desc: 'Paxos Gold' },
   { id: 'XAUT', label: 'XAUt0', desc: 'Tether Gold' },
   { id: 'WBTC', label: 'BTC', desc: 'Wrapped BTC' },
 ];
@@ -51,7 +50,7 @@ export function DepositDialog({
   const [lifiQuote, setLifiQuote] = useState<DepositQuotePreview | null>(null);
   const [lifiLoading, setLifiLoading] = useState(false);
 
-  const quickAmounts = [25, 50, 100, 250];
+  const quickAmounts = [1, 5, 10, 25];
   const parsedAmount = parseFloat(amount) || 0;
   const hasEnoughBalance = parsedAmount <= usdcBalance;
   const meetsMin = parsedAmount >= 1; // MIN_DEPOSIT = 1 USDC
@@ -121,7 +120,7 @@ export function DepositDialog({
           {/* Asset selector */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Savings asset</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {ASSET_OPTIONS.map((opt) => (
                 <button
                   key={opt.id}

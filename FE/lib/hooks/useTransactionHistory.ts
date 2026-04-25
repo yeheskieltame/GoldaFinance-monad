@@ -7,19 +7,27 @@ import {
     CONTRACT_ABIS,
     RPC_URL,
 } from '@/lib/services/contractService';
+import {
+    getSwapHistory,
+    addSwapRecord,
+    type SwapRecord,
+} from '@/lib/services/swapHistory';
 
 export interface Transaction {
     id: string;
     type: 'deposit' | 'withdraw_request' | 'claim' | 'swap';
-    amount: number; // USDC
+    amount: number; // USDC equivalent
     shares?: number;
     withdrawalId?: number;
     timestamp: Date;
     txHash: string;
-    status: 'completed';
+    status: 'completed' | 'pending' | 'failed';
     description: string;
     blockNumber: number;
     asset: 'usdc' | 'shares' | 'swap';
+    // Swap-specific fields
+    swapToSymbol?: string;
+    swapToAmount?: number;
 }
 
 export interface TransactionFilters {
@@ -29,7 +37,6 @@ export interface TransactionFilters {
 }
 
 // Monad RPC limits eth_getLogs to 100-block ranges.
-// We chunk queries into 99-block windows and merge results.
 const LOG_CHUNK_SIZE = 99;
 
 async function queryFilterChunked(
@@ -46,14 +53,29 @@ async function queryFilterChunked(
             const logs = await contract.queryFilter(filter, start, end);
             allLogs.push(...logs);
         } catch (err) {
-            // If a chunk fails, skip it rather than killing the whole query
             console.warn(`[TxHistory] log query chunk ${start}-${end} failed:`, err);
         }
-        // Tiny delay to avoid rate-limiting (25 req/s on QuickNode)
+        // Tiny delay to avoid rate-limiting
         await new Promise(r => setTimeout(r, 50));
     }
 
     return allLogs;
+}
+
+function swapRecordToTransaction(swap: SwapRecord): Transaction {
+    return {
+        id: `swap-${swap.txHash}`,
+        type: 'swap',
+        amount: swap.fromAmountHuman,
+        timestamp: new Date(swap.timestamp),
+        txHash: swap.txHash,
+        status: swap.status,
+        description: `Swapped ${swap.fromAmountHuman.toFixed(2)} ${swap.fromTokenSymbol} → ${swap.toAmountHuman.toFixed(6)} ${swap.toTokenSymbol}`,
+        blockNumber: 0, // not available for LiFi swaps
+        asset: 'swap',
+        swapToSymbol: swap.toTokenSymbol,
+        swapToAmount: swap.toAmountHuman,
+    };
 }
 
 export function useTransactionHistory(walletAddress: string | undefined) {
@@ -77,8 +99,6 @@ export function useTransactionHistory(walletAddress: string | undefined) {
 
             const txList: Transaction[] = [];
             const currentBlock = await provider.getBlockNumber();
-            // Only look back 5,000 blocks (~2 hours on Monad with ~0.5s blocks)
-            // This keeps queries fast and avoids rate limits
             const fromBlock = Math.max(0, currentBlock - 5_000);
 
             // Deposit(user, usdcIn, sharesOut)
@@ -108,7 +128,6 @@ export function useTransactionHistory(walletAddress: string | undefined) {
                 console.error('Error fetching Deposit events:', e);
             }
 
-            // Small delay between event type queries
             await new Promise(r => setTimeout(r, 100));
 
             // WithdrawRequested(user, id, shares, usdcOwed)
@@ -169,9 +188,11 @@ export function useTransactionHistory(walletAddress: string | undefined) {
                 console.error('Error fetching WithdrawClaimed events:', e);
             }
 
-            // NOTE: Removed USDC Transfer queries — they query too wide a range,
-            // hit the 100-block limit repeatedly, and cause rate-limit errors.
-            // Vault events (Deposit/Withdraw/Claim) are sufficient for history.
+            // Add local swap history (LiFi swaps that bypass the vault)
+            const swapHistory = getSwapHistory();
+            for (const swap of swapHistory) {
+                txList.push(swapRecordToTransaction(swap));
+            }
 
             txList.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
             setTransactions(txList);
@@ -204,6 +225,7 @@ export function useTransactionHistory(walletAddress: string | undefined) {
         error,
         refetch: fetchTransactions,
         filterTransactions,
+        addSwapRecord,
     };
 }
 

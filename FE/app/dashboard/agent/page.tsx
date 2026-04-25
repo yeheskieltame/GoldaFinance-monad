@@ -9,6 +9,7 @@ import { useAgentSettings } from '@/lib/hooks/useAgentSettings';
 import { analyzeGoldMarket, chatWithAI, getMarketInsight, GoldMarketAnalysis } from '@/lib/services/aiService';
 import { agentAutoSwap, LIFI_ASSET_MAP } from '@/lib/services/lifiService';
 import type { SavingsAssetId } from '@/lib/types';
+import { addSwapRecord } from '@/lib/services/swapHistory';
 import { approveUSDCToLiFi, hasLiFiApproval, CHAIN_ID, RPC_URL, EXPLORER_URL } from '@/lib/services/contractService';
 import { MONAD_MAINNET } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -59,7 +60,6 @@ interface AnalysisHistory {
 
 const ASSET_OPTIONS: { id: SavingsAssetId; label: string; icon: string; desc: string }[] = [
     { id: 'XAUT', label: 'XAUt0', icon: '🥇', desc: 'Tether Gold — 1 token = 1 troy oz' },
-    { id: 'PAXG', label: 'WBTC', icon: '₿', desc: 'PAXG not on Monad — WBTC proxy' },
     { id: 'WBTC', label: 'WBTC', icon: '₿', desc: 'Wrapped Bitcoin' },
 ];
 
@@ -302,6 +302,23 @@ export default function AgentPage() {
                 signer,
                 usdcAmount: tradeAmount,
                 targetAsset,
+            });
+
+            // Record in local swap history
+            addSwapRecord({
+                id: `agent-swap-${Date.now()}`,
+                fromToken: '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
+                fromTokenSymbol: 'USDC',
+                toToken: targetInfo.address,
+                toTokenSymbol: result.toSymbol,
+                fromAmount: String(Math.round(tradeAmount * 1e6)),
+                fromAmountHuman: tradeAmount,
+                toAmount: String(Math.round(result.estimatedOutput * 10 ** targetInfo.decimals)),
+                toAmountHuman: result.estimatedOutput,
+                txHash: result.txHash,
+                toolUsed: 'LiFi Agent',
+                timestamp: Date.now(),
+                status: 'completed',
             });
 
             // Update history to mark as executed
@@ -689,7 +706,7 @@ export default function AgentPage() {
                             {/* Target Asset Selector */}
                             <div>
                                 <p className="font-medium text-sm mb-2">Target Asset</p>
-                                <div className="grid grid-cols-3 gap-2">
+                                <div className="grid grid-cols-2 gap-2">
                                     {ASSET_OPTIONS.map((asset) => (
                                         <button
                                             key={asset.id}
@@ -833,7 +850,7 @@ export default function AgentPage() {
                             {/* Target Asset Selector */}
                             <div>
                                 <p className="font-medium text-sm mb-2">Target Asset</p>
-                                <div className="grid grid-cols-3 gap-2">
+                                <div className="grid grid-cols-2 gap-2">
                                     {ASSET_OPTIONS.map((asset) => (
                                         <button
                                             key={asset.id}

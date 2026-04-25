@@ -8,7 +8,7 @@
  * For hackathon demo, we use in-memory storage with module-level state.
  */
 
-export type SavingsAssetId = 'PAXG' | 'XAUT' | 'WBTC';
+export type SavingsAssetId = 'XAUT' | 'WBTC';
 
 export interface AgentSettings {
   walletAddress: string;

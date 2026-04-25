@@ -76,14 +76,6 @@ interface AssetTarget {
 }
 
 export const LIFI_ASSET_MAP: Record<SavingsAssetId, AssetTarget> = {
-  PAXG: {
-    chainId: MONAD_CHAIN_ID,
-    // PAXG is not yet on Monad; fall back to WBTC as proxy for gold exposure
-    // TODO: update when PAXG deploys on Monad
-    address: MONAD_TOKENS.WBTC.address,
-    decimals: MONAD_TOKENS.WBTC.decimals,
-    symbol: 'WBTC',
-  },
   XAUT: {
     chainId: MONAD_CHAIN_ID,
     address: MONAD_TOKENS.XAUt0.address,

@@ -44,7 +44,7 @@ export interface WithdrawClaimedEvent {
 
 // Savings asset preference. The contract is asset-agnostic; the operator
 // routes USDC -> the selected asset via LiFi off-chain.
-export type SavingsAssetId = "XAUT" | "PAXG" | "WBTC";
+export type SavingsAssetId = "XAUT" | "WBTC";
 
 // Network — Monad Mainnet ONLY
 export interface NetworkConfig {

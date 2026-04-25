@@ -271,10 +271,9 @@ export default function DashboardPage() {
                             </p>
                         </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                         {(
                             [
-                                { id: 'PAXG', label: 'PAXG', desc: 'Paxos Gold' },
                                 { id: 'XAUT', label: 'XAUt0', desc: 'Tether Gold' },
                                 { id: 'WBTC', label: 'BTC', desc: 'Wrapped BTC' },
                             ] as const
@@ -487,7 +486,7 @@ export default function DashboardPage() {
 
                 {/* Contract Info */}
                 <div className="bg-muted/50 rounded-xl p-3 text-xs text-muted-foreground space-y-1">
-                    <p className="font-medium">Network: Monad Testnet</p>
+                    <p className="font-medium">Network: Monad Mainnet</p>
                     <p className="font-mono truncate">Vault: {contractAddresses.GOLDA_VAULT}</p>
                     <p className="font-mono truncate">USDC: {contractAddresses.USDC}</p>
                     <p className="font-mono truncate">Wallet: {walletAddress || 'Not connected'}</p>

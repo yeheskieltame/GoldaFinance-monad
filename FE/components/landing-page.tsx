@@ -35,7 +35,7 @@ export default function LandingPage() {
     {
       icon: Sparkles,
       title: 'LiFi + Yield Routing',
-      description: 'USDC auto-swapped into XAUt0, PAXG, or BTC and supplied to Euler',
+      description: 'USDC auto-swapped into XAUt0 or BTC and supplied to Euler',
       color: 'text-blue-500',
       bgColor: 'bg-blue-100 dark:bg-blue-500/20',
     },
@@ -98,7 +98,7 @@ export default function LandingPage() {
         </h1>
 
         <p className="text-muted-foreground text-lg mb-8 leading-relaxed">
-          GoldaFinance routes your USDC into PAXG, XAUt0, or BTC on Monad and earns DeFi yield on top.
+          GoldaFinance routes your USDC into XAUt0 or BTC on Monad and earns DeFi yield on top.
         </p>
 
         {/* CTA Buttons */}
@@ -181,9 +181,8 @@ export default function LandingPage() {
       {/* Supported Assets */}
       <section className="px-4 py-8">
         <h2 className="text-xl font-bold mb-6">Pick your savings asset</h2>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {[
-            { id: 'PAXG', label: 'PAXG', desc: 'Paxos Gold', icon: '🥇' },
             { id: 'XAUT', label: 'XAUt0', desc: 'Tether Gold', icon: '🥇' },
             { id: 'BTC', label: 'BTC', desc: 'Wrapped BTC', icon: <Bitcoin className="w-6 h-6" /> },
           ].map((a) => (
@@ -203,7 +202,7 @@ export default function LandingPage() {
         <div className="space-y-4">
           {[
             { step: 1, title: 'Deposit USDC', desc: 'Mint gUSDC vault shares at the current NAV' },
-            { step: 2, title: 'Vault routes into PAXG / XAUt0 / BTC', desc: 'Operator executes LiFi swaps + supplies to Euler for yield' },
+            { step: 2, title: 'Vault routes into XAUt0 / BTC', desc: 'Operator executes LiFi swaps + supplies to Euler for yield' },
             { step: 3, title: 'Request Withdraw → Claim', desc: 'Burn shares, claim USDC once the vault is liquid' },
           ].map((item) => (
             <div key={item.step} className="flex gap-4 items-start">

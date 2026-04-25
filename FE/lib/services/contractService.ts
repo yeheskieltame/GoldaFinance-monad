@@ -58,14 +58,6 @@ export const SUPPORTED_ASSETS = [
     category: "gold",
   },
   {
-    id: "PAXG",
-    label: "PAXG",
-    description: "Paxos Gold — not yet on Monad, WBTC proxy",
-    address: "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
-    decimals: 8,
-    category: "gold",
-  },
-  {
     id: "WBTC",
     label: "WBTC",
     description: "Wrapped Bitcoin",

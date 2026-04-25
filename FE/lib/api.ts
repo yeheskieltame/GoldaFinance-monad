@@ -53,7 +53,7 @@ export class GoldaAPI {
   static async createDeposit(data: {
     walletAddress: string;
     amount: number;
-    asset: 'PAXG' | 'XAUT' | 'WBTC';
+    asset: 'XAUT' | 'WBTC';
     txHash?: string;
   }) {
     return this.request<{

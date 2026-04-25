@@ -28,6 +28,7 @@ import {
   type SwapStatus,
   type MonadTokenSymbol,
 } from '@/lib/services/lifiService';
+import { addSwapRecord } from '@/lib/services/swapHistory';
 import { ethers } from 'ethers';
 
 // ============================================
@@ -195,6 +196,23 @@ export default function SwapPage() {
 
       setTxHash(result.txHash);
       setSwapStatus({ status: 'PENDING', txHash: result.txHash });
+
+      // Record the swap in local history
+      addSwapRecord({
+        id: `swap-${Date.now()}`,
+        fromToken: fromToken,
+        fromTokenSymbol: getTokenSymbol(fromToken),
+        toToken: toToken,
+        toTokenSymbol: getTokenSymbol(toToken),
+        fromAmount: ethers.parseUnits(parsedAmount.toString(), fromDecimals).toString(),
+        fromAmountHuman: parsedAmount,
+        toAmount: quote.toAmount,
+        toAmountHuman: Number(ethers.formatUnits(quote.toAmount, toDecimals)),
+        txHash: result.txHash,
+        toolUsed: quote.toolUsed,
+        timestamp: Date.now(),
+        status: 'completed',
+      });
 
       // Poll status
       const finalStatus = await checkSwapStatus({

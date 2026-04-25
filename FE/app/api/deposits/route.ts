@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export type SavingsAssetId = 'PAXG' | 'XAUT' | 'WBTC';
+export type SavingsAssetId = 'XAUT' | 'WBTC';
 
 export interface Deposit {
   depositId: string;

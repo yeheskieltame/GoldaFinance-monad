@@ -12,7 +12,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "GoldaFinance — Inflation-proof Savings on Monad",
   description:
-    "Deposit USDC, earn yield backed by gold (XAUt0 / PAXG) and BTC via LiFi routing on Monad.",
+    "Deposit USDC, earn yield backed by gold (XAUt0) and BTC via LiFi routing on Monad.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

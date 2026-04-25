@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 
-export type SavingsAssetId = 'PAXG' | 'XAUT' | 'WBTC';
+export type SavingsAssetId = 'XAUT' | 'WBTC';
 
 export interface AgentSettings {
   walletAddress: string;
