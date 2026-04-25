@@ -4,6 +4,7 @@ import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 import { MobileLayout } from '@/components/mobile-layout';
+import { DetailPageSkeleton, Skeleton } from '@/components/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -237,15 +238,15 @@ export default function SwapPage() {
 
   if (!ready || !authenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-10 h-10 animate-spin text-foreground" />
-      </div>
+      <MobileLayout activeTab="home">
+        <DetailPageSkeleton cards={3} />
+      </MobileLayout>
     );
   }
 
   return (
     <MobileLayout activeTab="home">
-      <div className="px-4 pt-12 pb-6">
+      <div className="px-4 pt-safe md:pt-0 pb-6">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <button
@@ -359,15 +360,17 @@ export default function SwapPage() {
           )}
 
           <div className="py-2">
-            <p className="text-2xl font-semibold">
-              {quoteLoading ? (
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground inline" />
-              ) : quote ? (
-                `${toAmountFormatted} ${getTokenSymbol(toToken)}`
-              ) : (
-                <span className="text-muted-foreground">0.00</span>
-              )}
-            </p>
+            {quoteLoading ? (
+              <Skeleton className="h-7 w-32" rounded="md" />
+            ) : (
+              <p className="text-2xl font-semibold">
+                {quote ? (
+                  `${toAmountFormatted} ${getTokenSymbol(toToken)}`
+                ) : (
+                  <span className="text-muted-foreground">0.00</span>
+                )}
+              </p>
+            )}
           </div>
         </div>
 

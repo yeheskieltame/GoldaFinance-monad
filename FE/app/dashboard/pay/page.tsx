@@ -1,457 +1,711 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePrivy } from '@privy-io/react-auth';
 import { MobileLayout } from '@/components/mobile-layout';
+import { DetailPageSkeleton } from '@/components/skeleton';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useGoldaVault } from '@/lib/hooks/useAureoContract';
+import { EXPLORER_URL } from '@/lib/services/contractService';
 import {
     ArrowLeft,
-    Layers,
-    TrendingUp,
-    Shield,
+    Sparkles,
+    Brain,
+    Calendar,
+    Clock,
+    DollarSign,
+    Zap,
     Power,
-    Save,
-    BarChart3,
-    CheckCircle2,
     AlertCircle,
     Loader2,
-    Info,
-    ChevronDown,
-    ChevronUp,
+    CheckCircle2,
+    ExternalLink,
+    TrendingUp,
 } from 'lucide-react';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ============================================================================
+// Stack Agent — auto-deposit (DCA) USDC into the Golda Vault on a schedule.
+// ============================================================================
 
-interface DeFiProtocol {
-    id: string;
-    name: string;
-    icon: string;
-    description: string;
-    apy: string;
-    apyNum: number;
-    risk: 'low' | 'medium' | 'high';
-    tvl: string;
-    strategy: string;
-    color: string;
+type StackFrequency = 'daily' | 'weekly' | 'idle';
+
+interface StackSettings {
+    enabled: boolean;
+    frequency: StackFrequency;
+    amountPerStack: number;
+    /** For 'idle' mode: trigger when liquid USDC balance >= this. */
+    idleThreshold: number;
+    lastStackAt: number | null;
 }
 
-type RebalanceFreq = 'daily' | 'weekly' | 'monthly';
+interface StackEntry {
+    id: string;
+    amount: number;
+    sharesEarned: number;
+    timestamp: number;
+    txHash: string;
+    trigger: 'manual' | 'scheduled';
+}
 
-// ─── Static data ──────────────────────────────────────────────────────────────
+const SETTINGS_KEY = 'golda_stack_agent_v1';
+const HISTORY_KEY = 'golda_stack_history_v1';
 
-const PROTOCOLS: DeFiProtocol[] = [
-    {
-        id: 'apriori',
-        name: 'Apriori',
-        icon: '🔷',
-        description: 'Liquid MON staking. Earn native staking rewards while keeping liquidity via aprMON tokens.',
-        apy: '8.2%',
-        apyNum: 8.2,
-        risk: 'low',
-        tvl: '$4.2M',
-        strategy: 'MON → aprMON → staking yield',
-        color: 'var(--info)',
-    },
-    {
-        id: 'ambient',
-        name: 'Ambient Finance',
-        icon: '💧',
-        description: 'Concentrated liquidity AMM. Provide USDC-MON liquidity in targeted price ranges for enhanced yield.',
-        apy: '14.7%',
-        apyNum: 14.7,
-        risk: 'medium',
-        tvl: '$8.6M',
-        strategy: 'USDC + MON → LP → trading fees + incentives',
-        color: 'var(--warning)',
-    },
-    {
-        id: 'kuru',
-        name: 'Kuru Exchange',
-        icon: '⚡',
-        description: 'High-performance order-book DEX native to Monad. Automated market-making on gold and BTC pairs.',
-        apy: '22.5%',
-        apyNum: 22.5,
-        risk: 'high',
-        tvl: '$12.1M',
-        strategy: 'XAUt0/USDC & WBTC/USDC market-making',
-        color: 'var(--success)',
-    },
-];
-
-const RISK_LABEL: Record<string, { label: string; cls: string }> = {
-    low:    { label: 'Low Risk',    cls: 'bg-info-soft text-[var(--info)]' },
-    medium: { label: 'Medium Risk', cls: 'bg-warning-soft text-[var(--warning)]' },
-    high:   { label: 'High Risk',   cls: 'bg-success-soft text-[var(--success)]' },
+const DEFAULT_SETTINGS: StackSettings = {
+    enabled: false,
+    frequency: 'weekly',
+    amountPerStack: 25,
+    idleThreshold: 100,
+    lastStackAt: null,
 };
 
-const REBALANCE_OPTIONS: { id: RebalanceFreq; label: string }[] = [
-    { id: 'daily',   label: 'Daily' },
-    { id: 'weekly',  label: 'Weekly' },
-    { id: 'monthly', label: 'Monthly' },
-];
+const FREQ_MS: Record<StackFrequency, number> = {
+    daily: 24 * 60 * 60 * 1000,
+    weekly: 7 * 24 * 60 * 60 * 1000,
+    idle: 0,
+};
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function formatUSD(n: number) {
+    return n.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
 
-export default function DeFiAgentPage() {
+function formatCountdown(ms: number) {
+    if (ms <= 0) return 'Ready';
+    const totalSec = Math.floor(ms / 1000);
+    const days = Math.floor(totalSec / 86400);
+    const hours = Math.floor((totalSec % 86400) / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    if (mins > 0) return `${mins}m`;
+    return 'Now';
+}
+
+export default function StackAgentPage() {
     const router = useRouter();
     const { ready, authenticated } = usePrivy();
+    const { balances, deposit, walletAddress, fetchBalances } = useGoldaVault();
 
+    const [settings, setSettings] = useState<StackSettings>(DEFAULT_SETTINGS);
+    const [draft, setDraft] = useState<StackSettings>(DEFAULT_SETTINGS);
+    const [history, setHistory] = useState<StackEntry[]>([]);
+    const [now, setNow] = useState<number>(() => Date.now());
+    const [stacking, setStacking] = useState(false);
+    const [error, setError] = useState('');
+    const [feedback, setFeedback] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+    const stackingRef = useRef(false);
+
+    // ---- Persist hydration ---------------------------------------------------
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const s = window.localStorage.getItem(SETTINGS_KEY);
+            if (s) {
+                const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(s) } as StackSettings;
+                setSettings(parsed);
+                setDraft(parsed);
+            }
+            const h = window.localStorage.getItem(HISTORY_KEY);
+            if (h) setHistory(JSON.parse(h));
+        } catch {
+            /* ignore parse errors */
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    }, [settings]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    }, [history]);
+
+    // ---- Auth gate -----------------------------------------------------------
     useEffect(() => {
         if (ready && !authenticated) router.push('/');
     }, [ready, authenticated, router]);
 
-    const [allocations, setAllocations] = useState<Record<string, number>>({
-        apriori: 40,
-        ambient: 35,
-        kuru:    25,
-    });
-    const [settingsOpen, setSettingsOpen] = useState(false);
-    const [agentEnabled, setAgentEnabled] = useState(false);
-    const [autoCompound, setAutoCompound] = useState(true);
-    const [rebalanceFreq, setRebalanceFreq] = useState<RebalanceFreq>('weekly');
-    const [minRebalance, setMinRebalance] = useState(5);
-    const [isSaving, setIsSaving] = useState(false);
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
-
-    const totalAlloc = Object.values(allocations).reduce((s, v) => s + v, 0);
-    const allocValid = totalAlloc === 100;
-
-    // Keep allocations summing to 100 by scaling the other two when one slider moves
-    function handleSlider(id: string, value: number) {
-        setAllocations(prev => {
-            const others = Object.entries(prev).filter(([k]) => k !== id);
-            const othersTarget = 100 - value;
-            const othersTotal = others.reduce((s, [, v]) => s + v, 0);
-
-            const updated: Record<string, number> = { [id]: value };
-            if (othersTotal === 0) {
-                const even = Math.floor(othersTarget / others.length);
-                others.forEach(([k], i) => {
-                    updated[k] = i === others.length - 1 ? othersTarget - even * (others.length - 1) : even;
-                });
-            } else {
-                const scale = othersTarget / othersTotal;
-                let remaining = othersTarget;
-                others.forEach(([k, v], i) => {
-                    const newVal = i === others.length - 1 ? remaining : Math.round(v * scale);
-                    updated[k] = Math.max(0, newVal);
-                    remaining -= updated[k];
-                });
-            }
-            return updated;
-        });
-    }
-
-    async function handleSave() {
-        if (!allocValid) return;
-        setIsSaving(true);
-        setSaveStatus('idle');
-        try {
-            const config = { allocations, autoCompound, rebalanceFreq, minRebalance, enabled: agentEnabled };
-            localStorage.setItem('defi_agent_config', JSON.stringify(config));
-            await new Promise(r => setTimeout(r, 700));
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 3000);
-        } catch {
-            setSaveStatus('error');
-        } finally {
-            setIsSaving(false);
-        }
-    }
-
+    // ---- Tick the clock every 30s for countdowns -----------------------------
     useEffect(() => {
-        try {
-            const raw = localStorage.getItem('defi_agent_config');
-            if (!raw) return;
-            const cfg = JSON.parse(raw);
-            if (cfg.allocations) setAllocations(cfg.allocations);
-            if (typeof cfg.autoCompound === 'boolean') setAutoCompound(cfg.autoCompound);
-            if (cfg.rebalanceFreq) setRebalanceFreq(cfg.rebalanceFreq);
-            if (typeof cfg.minRebalance === 'number') setMinRebalance(cfg.minRebalance);
-            if (typeof cfg.enabled === 'boolean') setAgentEnabled(cfg.enabled);
-        } catch { /* ignore */ }
+        const id = setInterval(() => setNow(Date.now()), 30_000);
+        return () => clearInterval(id);
     }, []);
 
-    const blendedApy = PROTOCOLS.reduce((sum, p) => sum + p.apyNum * (allocations[p.id] / 100), 0);
+    // ---- Auto-feedback timeout -----------------------------------------------
+    useEffect(() => {
+        if (!feedback) return;
+        const id = setTimeout(() => setFeedback(null), 4000);
+        return () => clearTimeout(id);
+    }, [feedback]);
 
+    // ---- Derived stats -------------------------------------------------------
+    const totalStacked = useMemo(
+        () => history.reduce((sum, h) => sum + h.amount, 0),
+        [history],
+    );
+    const totalShares = useMemo(
+        () => history.reduce((sum, h) => sum + h.sharesEarned, 0),
+        [history],
+    );
+    const stacksThisWeek = useMemo(() => {
+        const cutoff = now - 7 * 86_400_000;
+        return history.filter(h => h.timestamp >= cutoff).length;
+    }, [history, now]);
+
+    const nextStackAt = useMemo<number | null>(() => {
+        if (!settings.enabled) return null;
+        if (settings.frequency === 'idle') {
+            return balances.usdc >= settings.idleThreshold ? now : null;
+        }
+        const interval = FREQ_MS[settings.frequency];
+        return (settings.lastStackAt ?? now) + interval;
+    }, [settings, now, balances.usdc]);
+
+    const countdown = useMemo(() => {
+        if (!settings.enabled) return 'Paused';
+        if (settings.frequency === 'idle') {
+            return balances.usdc >= settings.idleThreshold
+                ? 'Ready'
+                : `Waiting ($${formatUSD(settings.idleThreshold - balances.usdc)} to go)`;
+        }
+        return nextStackAt ? formatCountdown(nextStackAt - now) : '—';
+    }, [settings, balances.usdc, nextStackAt, now]);
+
+    const status: 'active' | 'paused' | 'setup' = useMemo(() => {
+        if (!settings.enabled) return 'paused';
+        if (settings.amountPerStack <= 0) return 'setup';
+        return 'active';
+    }, [settings.enabled, settings.amountPerStack]);
+
+    // ---- Core stack runner ---------------------------------------------------
+    const runStack = useCallback(
+        async (amount: number, trigger: 'manual' | 'scheduled') => {
+            if (stackingRef.current) return;
+            if (amount <= 0) {
+                setError('Amount must be greater than zero.');
+                return;
+            }
+            if (amount > balances.usdc) {
+                setError(`Insufficient USDC — wallet has $${formatUSD(balances.usdc)}.`);
+                return;
+            }
+            stackingRef.current = true;
+            setStacking(true);
+            setError('');
+            try {
+                const sharePriceBefore = balances.sharePrice || 1;
+                const result = await deposit(amount);
+                if (!result.success) {
+                    throw new Error(result.error ?? 'Deposit failed');
+                }
+                const sharesEarned = sharePriceBefore > 0 ? amount / sharePriceBefore : 0;
+                const entry: StackEntry = {
+                    id: result.txHash ?? `${Date.now()}`,
+                    amount,
+                    sharesEarned,
+                    timestamp: Date.now(),
+                    txHash: result.txHash ?? '',
+                    trigger,
+                };
+                setHistory(prev => [entry, ...prev].slice(0, 50));
+                setSettings(prev => ({ ...prev, lastStackAt: Date.now() }));
+                setFeedback({
+                    message:
+                        trigger === 'manual'
+                            ? `Stacked $${formatUSD(amount)} into the vault.`
+                            : `Auto-stack ran: $${formatUSD(amount)} deposited.`,
+                    tone: 'success',
+                });
+                await fetchBalances();
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Stack failed';
+                setError(msg);
+                setFeedback({ message: msg, tone: 'error' });
+            } finally {
+                stackingRef.current = false;
+                setStacking(false);
+            }
+        },
+        [balances.usdc, balances.sharePrice, deposit, fetchBalances],
+    );
+
+    // ---- Auto-stack scheduler (runs while page is open) ----------------------
+    useEffect(() => {
+        if (!settings.enabled || !ready || !authenticated) return;
+        if (settings.amountPerStack <= 0) return;
+        if (stackingRef.current) return;
+
+        const due =
+            settings.frequency === 'idle'
+                ? balances.usdc >= settings.idleThreshold
+                : nextStackAt !== null && nextStackAt <= now;
+
+        if (!due) return;
+        if (balances.usdc < settings.amountPerStack) return;
+
+        runStack(settings.amountPerStack, 'scheduled');
+    }, [
+        settings.enabled,
+        settings.frequency,
+        settings.amountPerStack,
+        settings.idleThreshold,
+        nextStackAt,
+        now,
+        balances.usdc,
+        ready,
+        authenticated,
+        runStack,
+    ]);
+
+    // ---- Handlers ------------------------------------------------------------
+    const settingsDirty = useMemo(
+        () =>
+            draft.frequency !== settings.frequency ||
+            draft.amountPerStack !== settings.amountPerStack ||
+            draft.idleThreshold !== settings.idleThreshold,
+        [draft, settings],
+    );
+
+    const saveSettings = () => {
+        setSettings(prev => ({ ...prev, ...draft }));
+        setFeedback({ message: 'Schedule saved.', tone: 'success' });
+    };
+
+    const toggleEnabled = () => {
+        setSettings(prev => ({ ...prev, enabled: !prev.enabled }));
+    };
+
+    // ---- Loading state -------------------------------------------------------
     if (!ready || !authenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
-            </div>
+            <MobileLayout activeTab="pay">
+                <DetailPageSkeleton cards={4} />
+            </MobileLayout>
         );
     }
 
+    const quickAmounts = [10, 25, 50, 100];
+
     return (
         <MobileLayout activeTab="pay">
-            {/* Header */}
-            <div className="bg-background sticky top-0 z-40 px-4 pt-12 pb-4 border-b border-border">
-                <div className="flex items-center gap-3">
+            {/* ============================================================
+                HERO HEADER — branded identity strip (back + title + status)
+                ============================================================ */}
+            <div className="vault-card ink !rounded-none !rounded-b-2xl px-4 pt-safe md:pt-0 pb-6 !min-h-0">
+                <div className="relative z-10 flex items-center gap-3">
                     <button
                         onClick={() => router.push('/dashboard')}
-                        className="p-2 rounded-full bg-muted hover:bg-secondary transition-colors"
+                        className="btn-haptic p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
+                        aria-label="Back"
                     >
                         <ArrowLeft className="w-5 h-5" />
                     </button>
-                    <div className="flex-1">
-                        <h1 className="text-xl font-semibold flex items-center gap-2">
-                            <Layers className="w-5 h-5 text-primary" />
-                            DeFi Agent
-                        </h1>
-                        <p className="text-xs text-muted-foreground">Multi-protocol yield automation on Monad</p>
+                    <div className="w-10 h-10 rounded-xl bg-white/12 backdrop-blur flex items-center justify-center">
+                        <Sparkles className="w-5 h-5" />
                     </div>
-                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
-                        agentEnabled ? 'bg-success-soft text-[var(--success)]' : 'bg-muted text-muted-foreground'
-                    }`}>
-                        <span className={`w-2 h-2 rounded-full ${agentEnabled ? 'bg-[var(--success)] animate-pulse' : 'bg-muted-foreground'}`} />
-                        {agentEnabled ? 'Active' : 'Inactive'}
+                    <div className="flex-1 min-w-0">
+                        <h1 className="text-title-2 truncate">Stack Agent</h1>
+                        <p className="text-footnote text-white/65 truncate">
+                            Auto-deposit USDC to Golda Vault
+                        </p>
                     </div>
+                    <StatusPill status={status} />
                 </div>
             </div>
 
-            <div className="px-4 py-4 space-y-4 pb-28">
-
-                {/* Blended yield banner */}
-                <div className="ios-card p-4 bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-xs text-muted-foreground mb-1">Blended Est. APY</p>
-                            <p className="text-3xl font-bold text-primary">{blendedApy.toFixed(1)}%</p>
-                            <p className="text-xs text-muted-foreground mt-1">Weighted by your allocation</p>
-                        </div>
-                        <div className="text-right">
-                            <BarChart3 className="w-10 h-10 text-primary/40 ml-auto mb-1" />
-                            <p className="text-xs text-muted-foreground">3 protocols</p>
-                            <p className="text-xs text-muted-foreground">Monad Mainnet</p>
-                        </div>
+            {/* ============================================================
+                BODY
+                ============================================================ */}
+            <div className="px-4 py-5 space-y-4 animate-fade-in">
+                {/* HEADLINE STATS — proper raised cards (not inside the hero) */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="ios-card-elev p-4">
+                        <p className="section-label mb-1">Total Stacked</p>
+                        <p className="text-title-1 font-num leading-tight">
+                            ${formatUSD(totalStacked)}
+                        </p>
+                        <p className="text-footnote text-muted-foreground mt-1 truncate">
+                            {history.length} stack{history.length === 1 ? '' : 's'}
+                            {totalShares > 0 && ` · ${totalShares.toFixed(4)} sh`}
+                        </p>
+                    </div>
+                    <div className="ios-card-elev p-4">
+                        <p className="section-label mb-1">Next Stack</p>
+                        <p className="text-title-1 font-num leading-tight">
+                            {countdown}
+                        </p>
+                        <p className="text-footnote text-muted-foreground mt-1 truncate">
+                            {settings.enabled
+                                ? `${labelFor(settings.frequency)} · $${formatUSD(settings.amountPerStack)}`
+                                : 'Auto-stacking is paused'}
+                        </p>
                     </div>
                 </div>
 
-                {/* Protocol allocation cards */}
-                <div>
-                    <div className="flex items-center justify-between mb-3">
-                        <h2 className="text-base font-semibold">Protocol Allocation</h2>
-                        <span className={`text-sm font-medium ${allocValid ? 'text-[var(--success)]' : 'text-[var(--destructive)]'}`}>
-                            {totalAlloc}% / 100%
-                        </span>
+                {/* Feedback toast (inline) */}
+                {feedback && (
+                    <div
+                        className={`flex items-center gap-2 text-sm p-3 rounded-xl border ${
+                            feedback.tone === 'success'
+                                ? 'bg-success-soft border-[var(--success)]/30 text-[var(--success)]'
+                                : 'bg-destructive-soft border-[var(--destructive)]/30 text-[var(--destructive)]'
+                        }`}
+                    >
+                        {feedback.tone === 'success' ? (
+                            <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        ) : (
+                            <AlertCircle className="w-4 h-4 shrink-0" />
+                        )}
+                        <span className="flex-1">{feedback.message}</span>
+                    </div>
+                )}
+
+                {/* AUTO-STACK TOGGLE */}
+                <div className="ios-card-elev p-4 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            settings.enabled
+                                ? 'bg-[var(--success)] text-white'
+                                : 'bg-surface text-muted-foreground'
+                        }`}>
+                            <Power className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                            <h3 className="text-headline truncate">Auto-Stacking</h3>
+                            <p className="text-footnote text-muted-foreground truncate">
+                                {settings.enabled
+                                    ? 'Agent will deposit on schedule'
+                                    : 'Tap to enable autonomous stacking'}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={toggleEnabled}
+                        className={`ios-switch ${settings.enabled ? 'on' : ''}`}
+                        aria-pressed={settings.enabled}
+                        aria-label="Toggle auto-stacking"
+                    >
+                        <span className="ios-switch-thumb" />
+                    </button>
+                </div>
+
+                {/* STACK SCHEDULE */}
+                <div className="ios-card-elev p-4 space-y-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center shrink-0">
+                            <Calendar className="w-5 h-5 text-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <h3 className="text-headline">Stack Schedule</h3>
+                            <p className="text-footnote text-muted-foreground">
+                                How often the agent runs
+                            </p>
+                        </div>
                     </div>
 
-                    <div className="space-y-3">
-                        {PROTOCOLS.map((protocol) => {
-                            const risk = RISK_LABEL[protocol.risk];
-                            const alloc = allocations[protocol.id] ?? 0;
-
+                    {/* Frequency picker */}
+                    <div className="grid grid-cols-3 gap-2">
+                        {(['daily', 'weekly', 'idle'] as const).map(freq => {
+                            const active = draft.frequency === freq;
                             return (
-                                <div key={protocol.id} className="ios-card p-4 space-y-3">
-                                    <div className="flex items-start gap-3">
-                                        <span className="text-2xl">{protocol.icon}</span>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <h3 className="font-semibold">{protocol.name}</h3>
-                                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${risk.cls}`}>
-                                                    {risk.label}
-                                                </span>
-                                            </div>
-                                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                                                {protocol.description}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-3 text-center">
-                                        <div className="flex-1 bg-muted rounded-lg p-2">
-                                            <p className="text-xs text-muted-foreground">Est. APY</p>
-                                            <p className="font-bold" style={{ color: protocol.color }}>{protocol.apy}</p>
-                                        </div>
-                                        <div className="flex-1 bg-muted rounded-lg p-2">
-                                            <p className="text-xs text-muted-foreground">TVL</p>
-                                            <p className="font-bold text-foreground">{protocol.tvl}</p>
-                                        </div>
-                                        <div className="flex-1 bg-muted rounded-lg p-2">
-                                            <p className="text-xs text-muted-foreground">Target</p>
-                                            <p className="font-bold text-primary">{alloc}%</p>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                                        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                                        <span>{protocol.strategy}</span>
-                                    </div>
-
-                                    {/* Allocation slider */}
-                                    <div className="space-y-1">
-                                        <div className="flex justify-between text-xs text-muted-foreground">
-                                            <span>Drag to adjust</span>
-                                            <span className="font-medium text-foreground">{alloc}%</span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min={0}
-                                            max={100}
-                                            value={alloc}
-                                            onChange={e => handleSlider(protocol.id, Number(e.target.value))}
-                                            className="w-full accent-primary h-2 rounded-full cursor-pointer"
-                                        />
-                                    </div>
-
-                                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full rounded-full transition-all duration-200"
-                                            style={{ width: `${alloc}%`, backgroundColor: protocol.color }}
-                                        />
-                                    </div>
-                                </div>
+                                <button
+                                    key={freq}
+                                    onClick={() =>
+                                        setDraft(prev => ({ ...prev, frequency: freq }))
+                                    }
+                                    className={`btn-haptic rounded-xl border py-3 text-sm font-semibold transition-colors ${
+                                        active
+                                            ? 'border-foreground bg-foreground text-background'
+                                            : 'border-border hover:bg-surface text-foreground'
+                                    }`}
+                                >
+                                    {labelFor(freq)}
+                                </button>
                             );
                         })}
                     </div>
 
-                    {!allocValid && (
-                        <div className="mt-2 flex items-center gap-2 text-xs text-[var(--destructive)]">
-                            <AlertCircle className="w-4 h-4 shrink-0" />
-                            Allocations must total exactly 100%
+                    {/* Amount per stack */}
+                    <div className="space-y-2">
+                        <label className="text-footnote text-muted-foreground">
+                            Amount per stack (USDC)
+                        </label>
+                        <div className="relative">
+                            <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                            <Input
+                                type="number"
+                                inputMode="decimal"
+                                value={draft.amountPerStack || ''}
+                                onChange={e =>
+                                    setDraft(prev => ({
+                                        ...prev,
+                                        amountPerStack: parseFloat(e.target.value) || 0,
+                                    }))
+                                }
+                                placeholder="25"
+                                className="pl-12 py-6 text-2xl font-semibold rounded-xl"
+                            />
                         </div>
-                    )}
-                </div>
-
-                {/* Agent toggle */}
-                <div className="ios-card p-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                                agentEnabled ? 'bg-success-soft' : 'bg-muted'
-                            }`}>
-                                <Power className={`w-5 h-5 ${agentEnabled ? 'text-[var(--success)]' : 'text-muted-foreground'}`} />
-                            </div>
-                            <div>
-                                <p className="font-semibold">DeFi Agent</p>
-                                <p className="text-xs text-muted-foreground">
-                                    {agentEnabled ? 'Autonomously managing positions' : 'Enable automated rebalancing'}
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            onClick={() => setAgentEnabled(v => !v)}
-                            className={`relative w-12 h-6 rounded-full transition-colors ${
-                                agentEnabled ? 'bg-[var(--success)]' : 'bg-muted-foreground/30'
-                            }`}
-                            aria-label="Toggle DeFi agent"
-                        >
-                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                                agentEnabled ? 'translate-x-6' : ''
-                            }`} />
-                        </button>
-                    </div>
-                </div>
-
-                {/* Advanced settings */}
-                <div className="ios-card overflow-hidden">
-                    <button
-                        onClick={() => setSettingsOpen(v => !v)}
-                        className="w-full flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
-                    >
-                        <div className="flex items-center gap-2">
-                            <Shield className="w-4 h-4 text-muted-foreground" />
-                            <span className="font-medium">Agent Settings</span>
-                        </div>
-                        {settingsOpen
-                            ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                            : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                    </button>
-
-                    {settingsOpen && (
-                        <div className="px-4 pb-4 space-y-5 border-t border-border pt-4">
-                            {/* Auto-compound */}
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm font-medium">Auto-compound Rewards</p>
-                                    <p className="text-xs text-muted-foreground">Reinvest yield automatically</p>
-                                </div>
+                        <div className="flex gap-2 pt-1">
+                            {quickAmounts.map(amt => (
                                 <button
-                                    onClick={() => setAutoCompound(v => !v)}
-                                    className={`relative w-10 h-5 rounded-full transition-colors ${
-                                        autoCompound ? 'bg-primary' : 'bg-muted-foreground/30'
+                                    key={amt}
+                                    onClick={() =>
+                                        setDraft(prev => ({ ...prev, amountPerStack: amt }))
+                                    }
+                                    className={`btn-haptic flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                        draft.amountPerStack === amt
+                                            ? 'bg-foreground text-background'
+                                            : 'bg-surface hover:bg-surface-2 text-foreground'
                                     }`}
                                 >
-                                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                                        autoCompound ? 'translate-x-5' : ''
-                                    }`} />
+                                    ${amt}
                                 </button>
-                            </div>
+                            ))}
+                        </div>
+                    </div>
 
-                            {/* Rebalance frequency */}
-                            <div>
-                                <p className="text-sm font-medium mb-2">Rebalance Frequency</p>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {REBALANCE_OPTIONS.map(opt => (
-                                        <button
-                                            key={opt.id}
-                                            onClick={() => setRebalanceFreq(opt.id)}
-                                            className={`py-2 rounded-lg text-sm font-medium transition-colors ${
-                                                rebalanceFreq === opt.id
-                                                    ? 'bg-primary text-white'
-                                                    : 'bg-muted text-foreground hover:bg-secondary'
-                                            }`}
-                                        >
-                                            {opt.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Min drift */}
-                            <div>
-                                <div className="flex justify-between text-sm mb-2">
-                                    <span className="font-medium">Min. Drift to Rebalance</span>
-                                    <span className="text-primary font-semibold">{minRebalance}%</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min={1}
-                                    max={20}
-                                    value={minRebalance}
-                                    onChange={e => setMinRebalance(Number(e.target.value))}
-                                    className="w-full accent-primary h-2 rounded-full cursor-pointer"
+                    {/* Idle threshold (only visible in idle mode) */}
+                    {draft.frequency === 'idle' && (
+                        <div className="space-y-2">
+                            <label className="text-footnote text-muted-foreground">
+                                Trigger when wallet USDC ≥
+                            </label>
+                            <div className="relative">
+                                <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={draft.idleThreshold || ''}
+                                    onChange={e =>
+                                        setDraft(prev => ({
+                                            ...prev,
+                                            idleThreshold: parseFloat(e.target.value) || 0,
+                                        }))
+                                    }
+                                    placeholder="100"
+                                    className="pl-12 py-5 text-lg font-semibold rounded-xl"
                                 />
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    Rebalance only when drift ≥ {minRebalance}% from target
-                                </p>
                             </div>
+                            <p className="text-[11px] text-muted-foreground">
+                                Agent stacks ${formatUSD(draft.amountPerStack || 0)} whenever your
+                                liquid USDC crosses this threshold.
+                            </p>
                         </div>
                     )}
-                </div>
 
-                {/* Save button */}
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving || !allocValid}
-                    className="w-full py-4 rounded-2xl font-semibold text-base flex items-center justify-center gap-2 bg-primary text-white disabled:opacity-50 transition-all active:scale-[0.98]"
-                >
-                    {isSaving ? (
-                        <><Loader2 className="w-5 h-5 animate-spin" /> Saving…</>
-                    ) : saveStatus === 'saved' ? (
-                        <><CheckCircle2 className="w-5 h-5" /> Configuration Saved</>
-                    ) : saveStatus === 'error' ? (
-                        <><AlertCircle className="w-5 h-5" /> Save Failed — Retry</>
-                    ) : (
-                        <><Save className="w-5 h-5" /> {agentEnabled ? 'Save & Activate Agent' : 'Save Configuration'}</>
+                    {/* Save button (only when dirty) */}
+                    {settingsDirty && (
+                        <Button
+                            onClick={saveSettings}
+                            className="w-full rounded-xl"
+                        >
+                            Save schedule
+                        </Button>
                     )}
-                </button>
-
-                {/* About section */}
-                <div className="ios-card p-4 space-y-2">
-                    <div className="flex items-center gap-2 mb-1">
-                        <TrendingUp className="w-4 h-4 text-muted-foreground" />
-                        <p className="text-sm font-semibold">How DeFi Agent Works</p>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                        The DeFi Agent monitors your target allocations and automatically rebalances your positions across Apriori, Ambient Finance, and Kuru Exchange on Monad.
-                    </p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                        Set your desired split, enable the agent, and it routes your USDC to maximize yield while respecting your risk profile. All transactions settle on Monad with ~1s finality.
-                    </p>
                 </div>
 
+                {/* MANUAL STACK NOW */}
+                <div className="ios-card-elev p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center shrink-0">
+                            <Zap className="w-5 h-5 text-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <h3 className="text-headline">Stack Now</h3>
+                            <p className="text-footnote text-muted-foreground">
+                                Manual one-shot deposit · ${formatUSD(balances.usdc)} USDC available
+                            </p>
+                        </div>
+                    </div>
+                    <Button
+                        onClick={() => runStack(settings.amountPerStack, 'manual')}
+                        disabled={
+                            stacking ||
+                            settings.amountPerStack <= 0 ||
+                            balances.usdc < settings.amountPerStack
+                        }
+                        className="w-full rounded-xl !h-12 disabled:opacity-50"
+                    >
+                        {stacking ? (
+                            <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Stacking…
+                            </>
+                        ) : (
+                            <>
+                                <Zap className="w-4 h-4 mr-2" />
+                                Stack ${formatUSD(settings.amountPerStack)} now
+                            </>
+                        )}
+                    </Button>
+                    {balances.usdc < settings.amountPerStack && (
+                        <p className="text-[11px] text-[var(--warning)] flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            Wallet balance below the configured stack amount.
+                        </p>
+                    )}
+                    {error && (
+                        <p className="text-[11px] text-[var(--destructive)] flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            {error}
+                        </p>
+                    )}
+                </div>
+
+                {/* STATS GRID */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="ios-card p-4">
+                        <p className="section-label mb-1">This Week</p>
+                        <p className="text-title-2 font-num">{stacksThisWeek}</p>
+                        <p className="text-footnote text-muted-foreground">
+                            stack{stacksThisWeek === 1 ? '' : 's'}
+                        </p>
+                    </div>
+                    <div className="ios-card p-4">
+                        <p className="section-label mb-1">Vault Shares Earned</p>
+                        <p className="text-title-2 font-num">{totalShares.toFixed(4)}</p>
+                        <p className="text-footnote text-muted-foreground">gUSDC</p>
+                    </div>
+                </div>
+
+                {/* RECENT ACTIVITY */}
+                <div className="ios-card overflow-hidden">
+                    <div className="p-4 border-b border-border flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-surface flex items-center justify-center">
+                                <Clock className="w-4 h-4 text-foreground" />
+                            </div>
+                            <h3 className="text-headline">Recent Stacks</h3>
+                        </div>
+                        {history.length > 0 && (
+                            <span className="chip chip-mono text-[10px]">
+                                {history.length} total
+                            </span>
+                        )}
+                    </div>
+                    {history.length === 0 ? (
+                        <div className="p-8 text-center">
+                            <div className="w-12 h-12 mx-auto mb-2 rounded-2xl bg-surface flex items-center justify-center">
+                                <Sparkles className="w-5 h-5 text-muted-foreground" />
+                            </div>
+                            <p className="text-footnote text-muted-foreground">
+                                No stacks yet — enable the agent or stack manually.
+                            </p>
+                        </div>
+                    ) : (
+                        <ul className="divide-y divide-border">
+                            {history.slice(0, 8).map(entry => (
+                                <li key={entry.id} className="p-4 flex items-center gap-3">
+                                    <div
+                                        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                                            entry.trigger === 'scheduled'
+                                                ? 'bg-[color-mix(in_srgb,var(--electric-purple)_18%,transparent)] text-[var(--electric-purple)]'
+                                                : 'bg-surface text-foreground'
+                                        }`}
+                                    >
+                                        {entry.trigger === 'scheduled' ? (
+                                            <Brain className="w-5 h-5" />
+                                        ) : (
+                                            <TrendingUp className="w-5 h-5" />
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-headline truncate">
+                                            ${formatUSD(entry.amount)}
+                                            <span className="text-footnote text-muted-foreground font-normal ml-1.5">
+                                                · {entry.trigger}
+                                            </span>
+                                        </p>
+                                        <p className="text-footnote text-muted-foreground">
+                                            {new Date(entry.timestamp).toLocaleString(undefined, {
+                                                month: 'short',
+                                                day: 'numeric',
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })}
+                                            {' · '}
+                                            {entry.sharesEarned.toFixed(4)} gUSDC
+                                        </p>
+                                    </div>
+                                    {entry.txHash && (
+                                        <a
+                                            href={`${EXPLORER_URL}/tx/${entry.txHash}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="btn-haptic shrink-0 p-2 rounded-full hover:bg-surface text-muted-foreground"
+                                            aria-label="View transaction"
+                                        >
+                                            <ExternalLink className="w-4 h-4" />
+                                        </a>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+
+                {/* HOW IT WORKS */}
+                <div className="ios-card p-4">
+                    <h4 className="text-headline mb-2 flex items-center gap-2">
+                        <Brain className="w-4 h-4 text-[var(--electric-purple)]" />
+                        How Stack Agent works
+                    </h4>
+                    <ul className="space-y-1.5 text-footnote text-muted-foreground list-disc list-inside">
+                        <li>Pick a frequency — daily, weekly, or idle-balance trigger.</li>
+                        <li>Set how much USDC to stack each run.</li>
+                        <li>
+                            Enable the toggle and the agent deposits into your{' '}
+                            <span className="text-foreground font-medium">Golda Vault</span> on
+                            schedule.
+                        </li>
+                        <li>You earn vault shares (gUSDC) backed by gold and BTC.</li>
+                    </ul>
+                    {walletAddress && (
+                        <p className="text-[10px] text-muted-foreground mt-3 font-mono">
+                            agent runs while this page is open · {walletAddress.slice(0, 6)}…{walletAddress.slice(-4)}
+                        </p>
+                    )}
+                </div>
             </div>
         </MobileLayout>
+    );
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function labelFor(freq: StackFrequency) {
+    switch (freq) {
+        case 'daily':
+            return 'Daily';
+        case 'weekly':
+            return 'Weekly';
+        case 'idle':
+            return 'Idle balance';
+    }
+}
+
+function StatusPill({ status }: { status: 'active' | 'paused' | 'setup' }) {
+    const cfg = {
+        active: { bg: 'bg-success-soft', text: 'text-[var(--success)]', label: 'Active', dot: 'bg-[var(--success)]' },
+        paused: { bg: 'bg-white/10', text: 'text-white/80', label: 'Paused', dot: 'bg-white/60' },
+        setup: { bg: 'bg-warning-soft', text: 'text-[var(--warning)]', label: 'Setup', dot: 'bg-[var(--warning)]' },
+    }[status];
+    return (
+        <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.12em] shrink-0 ${cfg.bg} ${cfg.text}`}
+        >
+            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+            {cfg.label}
+        </span>
     );
 }

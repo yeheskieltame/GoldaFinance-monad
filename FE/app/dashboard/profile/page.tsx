@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePrivy } from '@privy-io/react-auth';
 import { MobileLayout } from '@/components/mobile-layout';
+import { ProfilePageSkeleton } from '@/components/skeleton';
 import {
     ArrowLeft,
     Shield,
@@ -16,7 +17,6 @@ import {
     Moon,
     Sun,
     ExternalLink,
-    Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -61,9 +61,9 @@ export default function ProfilePage() {
 
     if (!ready || !authenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
-            </div>
+            <MobileLayout activeTab="profile">
+                <ProfilePageSkeleton />
+            </MobileLayout>
         );
     }
 
@@ -97,7 +97,7 @@ export default function ProfilePage() {
     return (
         <MobileLayout activeTab="profile">
             {/* Header */}
-            <div className="px-4 md:px-0 pt-12 md:pt-0 pb-8">
+            <div className="px-4 md:px-0 pt-safe md:pt-0 pb-8">
                 <div className="flex items-center gap-4 mb-6">
                     <button
                         onClick={() => router.push('/dashboard')}

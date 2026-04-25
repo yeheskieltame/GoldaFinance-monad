@@ -3,7 +3,7 @@
 import {
     ArrowUpRight,
     Plus,
-    Send,
+    Sparkles,
     ArrowDownUp,
     ArrowLeftRight,
 } from 'lucide-react';
@@ -24,10 +24,10 @@ interface QuickAction {
 interface QuickActionsProps {
     onDeposit?: () => void;
     onWithdraw?: () => void;
-    onSend?: () => void;
+    onStack?: () => void;
 }
 
-export function QuickActions({ onDeposit, onWithdraw, onSend }: QuickActionsProps) {
+export function QuickActions({ onDeposit, onWithdraw, onStack }: QuickActionsProps) {
     const router = useRouter();
 
     const actions: QuickAction[] = [
@@ -40,12 +40,12 @@ export function QuickActions({ onDeposit, onWithdraw, onSend }: QuickActionsProp
             onClick: onDeposit,
         },
         {
-            id: 'send',
-            label: 'Send',
-            icon: Send,
-            tone: 'text-foreground',
-            chip: 'bg-surface-2',
-            onClick: onSend || (() => router.push('/dashboard/pay?mode=send')),
+            id: 'stack',
+            label: 'Stack',
+            icon: Sparkles,
+            tone: 'text-white',
+            chip: 'bg-[var(--electric-purple)]',
+            onClick: onStack || (() => router.push('/dashboard/pay')),
         },
         {
             id: 'swap',
@@ -68,7 +68,7 @@ export function QuickActions({ onDeposit, onWithdraw, onSend }: QuickActionsProp
             label: 'Withdraw',
             icon: ArrowUpRight,
             tone: 'text-white',
-            chip: 'bg-[var(--red-500)]',
+            chip: 'bg-[var(--accent)]',
             onClick: onWithdraw,
         },
     ];

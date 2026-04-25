@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { MobileLayout } from '@/components/mobile-layout';
+import { DetailPageSkeleton, Skeleton } from '@/components/skeleton';
 import { useAureoContract } from '@/lib/hooks/useAureoContract';
 import { useAgentSettings } from '@/lib/hooks/useAgentSettings';
 import { analyzeGoldMarket, chatWithAI, getMarketInsight, GoldMarketAnalysis } from '@/lib/services/aiService';
@@ -386,9 +387,9 @@ export default function AgentPage() {
 
     if (!ready || !authenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
-            </div>
+            <MobileLayout activeTab="agent">
+                <DetailPageSkeleton cards={4} headerActions />
+            </MobileLayout>
         );
     }
 
@@ -406,7 +407,7 @@ export default function AgentPage() {
     return (
         <MobileLayout activeTab="agent">
             {/* Header */}
-            <div className="bg-background px-4 pt-12 pb-6">
+            <div className="bg-background px-4 pt-safe md:pt-0 pb-6">
                 <div className="flex items-center gap-4 mb-6">
                     <button
                         onClick={() => router.push('/dashboard')}
@@ -478,32 +479,32 @@ export default function AgentPage() {
                 {/* ============================================ */}
                 {/* LiFi Approval — One-Time Unlock              */}
                 {/* ============================================ */}
-                <div className={`rounded-2xl border-2 overflow-hidden transition-all ${
+                <div className={`rounded-2xl border overflow-hidden transition-all ${
                     lifiApproved
-                        ? 'border-[var(--success)]/50 bg-success-soft dark:bg-success-soft'
-                        : 'border-border/50 bg-warning-soft dark:bg-warning-soft'
+                        ? 'border-[var(--success)]/40 bg-success-soft'
+                        : 'border-[var(--warning)]/45 bg-warning-soft'
                 }`}>
-                    <div className="p-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    <div className="p-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                                 lifiApproved
-                                    ? 'bg-success-soft'
-                                    : 'bg-warning-soft'
+                                    ? 'bg-[var(--success)] text-white'
+                                    : 'bg-[var(--warning)] text-[var(--warning-foreground)]'
                             }`}>
                                 {lifiApproved ? (
-                                    <CheckCircle2 className="w-5 h-5 text-[var(--success)]" />
+                                    <CheckCircle2 className="w-5 h-5" />
                                 ) : (
-                                    <Unlock className="w-5 h-5 text-[var(--warning)]" />
+                                    <Unlock className="w-5 h-5" />
                                 )}
                             </div>
-                            <div>
-                                <h3 className="font-semibold text-sm">
+                            <div className="min-w-0">
+                                <h3 className="font-semibold text-sm text-foreground truncate">
                                     {lifiApproved ? 'Auto-Swap Unlocked' : 'Unlock Auto-Swap'}
                                 </h3>
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-xs text-muted-foreground truncate">
                                     {lifiApproved
                                         ? 'USDC approved to LiFi — agent can swap anytime'
-                                        : 'One signature to let agent swap USDC via LiFi'}
+                                        : 'One signature lets the agent swap USDC via LiFi'}
                                 </p>
                             </div>
                         </div>
@@ -512,7 +513,7 @@ export default function AgentPage() {
                                 onClick={handleApproveLiFi}
                                 disabled={approving || checkingApproval}
                                 size="sm"
-                                className="rounded-xl bg-[var(--warning)] hover:opacity-90"
+                                className="rounded-xl shrink-0 bg-[var(--warning)] text-[var(--warning-foreground)] hover:bg-[var(--warning)] hover:opacity-90 disabled:opacity-60"
                             >
                                 {approving ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -527,7 +528,7 @@ export default function AgentPage() {
                     </div>
                     {!lifiApproved && !checkingApproval && (
                         <div className="px-4 pb-4">
-                            <div className="bg-white/50 dark:bg-white/5 rounded-xl p-3 text-xs text-muted-foreground">
+                            <div className="bg-background/50 dark:bg-background/30 border border-[var(--warning)]/15 rounded-xl p-3 text-xs text-muted-foreground">
                                 <p className="font-medium text-foreground mb-1">How it works:</p>
                                 <ul className="space-y-1 list-disc list-inside">
                                     <li>Sign 1 approval tx — USDC to LiFi Diamond</li>
@@ -642,10 +643,17 @@ export default function AgentPage() {
 
                     {/* Loading State */}
                     {isAnalyzing && (
-                        <div className="p-8 text-center">
-                            <Loader2 className="w-12 h-12 text-foreground mx-auto mb-3 animate-spin" />
-                            <p className="text-muted-foreground">Analyzing market conditions...</p>
-                            <p className="text-xs text-muted-foreground mt-1">Using Gemini Flash AI</p>
+                        <div className="p-5 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <Skeleton className="h-5 w-40" rounded="md" />
+                                <Skeleton className="h-5 w-16" rounded="full" />
+                            </div>
+                            <Skeleton className="h-9 w-32" rounded="md" />
+                            <Skeleton className="h-3 w-full" rounded="md" />
+                            <Skeleton className="h-3 w-4/5" rounded="md" />
+                            <p className="text-xs text-muted-foreground text-center pt-1">
+                                Analyzing market with Gemini Flash AI…
+                            </p>
                         </div>
                     )}
                 </div>

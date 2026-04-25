@@ -6,8 +6,8 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#ffffff",
-  "theme_color": "#0066FF",
+  "background_color": "#120B29",
+  "theme_color": "#120B29",
   "icons": [
     {
       "src": "/aureo-logo.svg",

@@ -1,6 +1,6 @@
 'use client';
 
-import { Eye, EyeOff, Copy, Check, Sparkles } from 'lucide-react';
+import { Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { useState } from 'react';
 
 interface WalletCardProps {
@@ -11,15 +11,15 @@ interface WalletCardProps {
     walletAddress?: string;
     /**
      * Visual variant.
-     * - `ink`  (default): editorial near-black gradient with red highlight.
-     * - `red`: brand-accent red gradient — use for hero/CTA contexts.
-     * - `gold`: legacy gold gradient — kept for asset-detail screens.
+     * - `ink`  (default): editorial near-black gradient with electric-purple highlight.
+     * - `red`: brand-accent purple gradient — use for hero/CTA contexts.
+     * - `gold`: legacy lilac gradient — kept for asset-detail screens.
      */
     variant?: 'ink' | 'red' | 'gold';
 }
 
 export function WalletCard({
-    usdcBalance,
+    usdcBalance: _usdcBalance,
     shares,
     sharePrice,
     assetLabel = 'XAUt0',
@@ -29,6 +29,7 @@ export function WalletCard({
     const [showBalance, setShowBalance] = useState(true);
     const [copied, setCopied] = useState(false);
 
+    void _usdcBalance; // shown in dashboard portfolio grid, not on the card chrome
     const shareValue = shares * sharePrice;
 
     const copyAddress = async () => {
@@ -38,8 +39,13 @@ export function WalletCard({
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const formatAddress = (address: string) =>
-        `${address.slice(0, 6)}…${address.slice(-4)}`;
+    /** Format a wallet address as a credit-card-style PAN: `0x12 •••• •••• 3a4b`. */
+    const formatPan = (address?: string) => {
+        if (!address) return '0x•• •••• •••• ••••';
+        const head = address.slice(0, 4); // "0x12"
+        const tail = address.slice(-4);   // last 4
+        return `${head} •••• •••• ${tail}`;
+    };
 
     const formatMoney = (n: number) =>
         n.toLocaleString('en-US', {
@@ -48,97 +54,85 @@ export function WalletCard({
         });
 
     return (
-        <div className={`vault-card ${variant} text-white`}>
-            {/* Decorative concentric rings */}
-            <div
-                className="pointer-events-none absolute -top-6 -right-6 w-40 h-40 opacity-15"
-                aria-hidden
-            >
-                <svg viewBox="0 0 200 200" fill="none">
-                    <circle cx="100" cy="100" r="80" stroke="currentColor" />
-                    <circle cx="100" cy="100" r="60" stroke="currentColor" />
-                    <circle cx="100" cy="100" r="40" stroke="currentColor" />
-                </svg>
-            </div>
+        <div className={`vault-card bank-card ${variant} text-white`}>
+            <span className="bank-shine" aria-hidden />
 
-            {/* Header */}
-            <div className="relative z-10 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center backdrop-blur-sm">
-                        <Sparkles className="w-4 h-4" />
-                    </div>
-                    <span className="section-label !text-white/80">
-                        Golda Vault
+            {/* Top row — chip + brand wordmark */}
+            <div className="relative z-10 flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="bank-chip" aria-hidden />
+                    <span className="bank-asset">
+                        <span className="opacity-70">backed by</span>
+                        <span>{assetLabel}</span>
                     </span>
                 </div>
-                <button
-                    onClick={() => setShowBalance(!showBalance)}
-                    className="btn-haptic p-2 rounded-full bg-white/10 hover:bg-white/20"
-                    aria-label={showBalance ? 'Hide balance' : 'Show balance'}
-                >
-                    {showBalance ? (
-                        <Eye className="w-4 h-4" />
-                    ) : (
-                        <EyeOff className="w-4 h-4" />
-                    )}
-                </button>
+                <div className="text-right">
+                    <p className="bank-brand">Golda</p>
+                    <p className="bank-brand-sub">savings vault</p>
+                </div>
             </div>
 
-            {/* Savings value */}
+            {/* Middle — hero balance */}
             <div className="relative z-10">
-                <p className="text-caption uppercase tracking-wider text-white/65 mb-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/55 mb-1">
                     Savings Value
                 </p>
-                <p className="text-large-title md:text-display font-num">
-                    {showBalance ? `$${formatMoney(shareValue)}` : '••••••'}
-                </p>
-                <p className="text-footnote text-white/70 mt-1">
-                    {showBalance
-                        ? `${shares.toFixed(4)} gUSDC`
-                        : '••••'}
-                    {' · backed by '}
-                    {assetLabel}
-                </p>
-            </div>
-
-            {/* USDC balance */}
-            <div className="relative z-10">
-                <p className="text-caption uppercase tracking-wider text-white/65 mb-1">
-                    USDC Balance
-                </p>
-                <div className="flex items-baseline gap-2">
-                    <span className="text-title-2 font-num">
-                        {showBalance ? formatMoney(usdcBalance) : '••••'}
-                    </span>
-                    <span className="text-footnote font-medium text-white/80">
-                        USDC
-                    </span>
+                <div className="flex items-baseline gap-3">
+                    <p className="text-large-title md:text-display font-num leading-none">
+                        {showBalance ? `$${formatMoney(shareValue)}` : '•• ••• ••'}
+                    </p>
                 </div>
+                <p className="text-footnote text-white/65 mt-2">
+                    {showBalance ? `${shares.toFixed(4)} gUSDC` : '••••'}
+                    <span className="mx-1.5 opacity-50">·</span>
+                    <span className="opacity-80">backed by {assetLabel}</span>
+                </p>
             </div>
 
-            {walletAddress && (
-                <div className="relative z-10 flex items-center justify-between pt-3 border-t border-white/15">
-                    <div>
-                        <p className="text-caption uppercase tracking-wider text-white/65">
-                            Wallet
-                        </p>
-                        <p className="font-mono text-footnote">
-                            {formatAddress(walletAddress)}
-                        </p>
-                    </div>
-                    <button
-                        onClick={copyAddress}
-                        className="btn-haptic p-2 rounded-lg bg-white/10 hover:bg-white/20"
-                        aria-label="Copy wallet address"
-                    >
-                        {copied ? (
-                            <Check className="w-4 h-4" />
-                        ) : (
-                            <Copy className="w-4 h-4" />
+            {/* Bottom — PAN + actions + network */}
+            <div className="relative z-10 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
+                    <p className="bank-pan truncate">
+                        {showBalance ? formatPan(walletAddress) : '•••• •••• •••• ••••'}
+                    </p>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                            onClick={() => setShowBalance(!showBalance)}
+                            className="btn-haptic p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                            aria-label={showBalance ? 'Hide balance' : 'Show balance'}
+                        >
+                            {showBalance ? (
+                                <Eye className="w-4 h-4" />
+                            ) : (
+                                <EyeOff className="w-4 h-4" />
+                            )}
+                        </button>
+                        {walletAddress && (
+                            <button
+                                onClick={copyAddress}
+                                className="btn-haptic p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                                aria-label="Copy wallet address"
+                            >
+                                {copied ? (
+                                    <Check className="w-4 h-4" />
+                                ) : (
+                                    <Copy className="w-4 h-4" />
+                                )}
+                            </button>
                         )}
-                    </button>
+                    </div>
                 </div>
-            )}
+
+                <div className="flex items-center justify-between gap-2">
+                    <span className="bank-network">
+                        <span className="bank-network-dot" />
+                        Monad · Mainnet
+                    </span>
+                    <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-white/50">
+                        gUSDC ▸ {assetLabel}
+                    </span>
+                </div>
+            </div>
         </div>
     );
 }
