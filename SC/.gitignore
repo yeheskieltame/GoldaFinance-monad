@@ -1,0 +1,13 @@
+# Foundry
+out/
+cache/
+broadcast/*/dry-run/
+broadcast/**/run-latest.json
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
