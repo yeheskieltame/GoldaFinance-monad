@@ -66,7 +66,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         appearance: {
           theme: 'dark',
           accentColor: '#8B5CF6',
-          logo: '/aureo-logo.svg',
+          logo: '/Icon.png',
           showWalletLoginFirst: false,
         },
 

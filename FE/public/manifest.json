@@ -10,7 +10,7 @@
   "theme_color": "#120B29",
   "icons": [
     {
-      "src": "/aureo-logo.svg",
+      "src": "/Icon.png",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
