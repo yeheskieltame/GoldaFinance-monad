@@ -124,16 +124,50 @@ export const CONTRACT_ABIS = {
 // ============================================
 // RPC Provider (singleton for reads)
 // ============================================
+// IMPORTANT: ethers v6 batches concurrent calls into a single JSON-RPC array
+// request by default (batchMaxCount=100). The public Monad RPC sometimes
+// fails the whole batch with `error.data = null`, which surfaces as
+// `CALL_EXCEPTION ... missing revert data` for every read in the batch even
+// though each individual call would succeed. We disable batching to keep
+// reads independent and add a tiny retry around the contract calls below.
 
 let _readProvider: ethers.JsonRpcProvider | null = null;
 
 function readProvider(): ethers.JsonRpcProvider {
   if (!_readProvider) {
-    _readProvider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID, {
-      staticNetwork: true, // prevent auto-chain detection which can cause issues
+    const network = ethers.Network.from(CHAIN_ID);
+    _readProvider = new ethers.JsonRpcProvider(RPC_URL, network, {
+      staticNetwork: network, // pin to chain, no auto-detection
+      batchMaxCount: 1,       // disable JSON-RPC batching (Monad RPC quirk)
     });
   }
   return _readProvider;
+}
+
+/**
+ * Retry wrapper for transient RPC failures (rate limits, batch hiccups).
+ * Returns the fallback value if every attempt fails.
+ */
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  fallback: T,
+  attempts = 3,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) {
+        // 120ms, 360ms backoff
+        await new Promise(r => setTimeout(r, 120 * Math.pow(3, i)));
+      }
+    }
+  }
+  console.error(`${label}:`, lastErr);
+  return fallback;
 }
 
 function vaultRead(provider: ethers.Provider) {
@@ -149,62 +183,65 @@ function usdcRead(provider: ethers.Provider) {
 // ============================================
 
 export async function getUSDCBalance(userAddress: string): Promise<number> {
-  try {
-    const usdc = usdcRead(readProvider());
-    const bal: bigint = await usdc.balanceOf(userAddress);
-    return Number(ethers.formatUnits(bal, USDC_DECIMALS));
-  } catch (err) {
-    console.error("getUSDCBalance:", err);
-    return 0;
-  }
+  return withRetry(
+    "getUSDCBalance",
+    async () => {
+      const usdc = usdcRead(readProvider());
+      const bal: bigint = await usdc.balanceOf(userAddress);
+      return Number(ethers.formatUnits(bal, USDC_DECIMALS));
+    },
+    0,
+  );
 }
 
 export async function getShareBalance(userAddress: string): Promise<number> {
-  try {
-    const vault = vaultRead(readProvider());
-    const bal: bigint = await vault.balanceOf(userAddress);
-    // Vault shares use 18 decimals (confirmed on-chain: decimals() returns 18)
-    return Number(ethers.formatUnits(bal, VAULT_SHARE_DECIMALS));
-  } catch (err) {
-    console.error("getShareBalance:", err);
-    return 0;
-  }
+  return withRetry(
+    "getShareBalance",
+    async () => {
+      const vault = vaultRead(readProvider());
+      const bal: bigint = await vault.balanceOf(userAddress);
+      // Vault shares use 18 decimals (confirmed on-chain).
+      return Number(ethers.formatUnits(bal, VAULT_SHARE_DECIMALS));
+    },
+    0,
+  );
 }
 
 /** Price of 1 share in USDC (human number). Defaults to 1.0 at genesis. */
 export async function getSharePrice(): Promise<number> {
-  try {
-    const vault = vaultRead(readProvider());
-    const price: bigint = await vault.sharePrice();
-    // sharePrice returns USDC units (6 decimals) — confirmed on-chain
-    return Number(ethers.formatUnits(price, USDC_DECIMALS));
-  } catch (err) {
-    console.error("getSharePrice:", err);
-    return 1;
-  }
+  return withRetry(
+    "getSharePrice",
+    async () => {
+      const vault = vaultRead(readProvider());
+      const price: bigint = await vault.sharePrice();
+      return Number(ethers.formatUnits(price, USDC_DECIMALS));
+    },
+    1,
+  );
 }
 
 export async function getNAV(): Promise<number> {
-  try {
-    const vault = vaultRead(readProvider());
-    const nav: bigint = await vault.navUSDC();
-    // navUSDC is in USDC units (6 decimals)
-    return Number(ethers.formatUnits(nav, USDC_DECIMALS));
-  } catch (err) {
-    console.error("getNAV:", err);
-    return 0;
-  }
+  return withRetry(
+    "getNAV",
+    async () => {
+      const vault = vaultRead(readProvider());
+      const nav: bigint = await vault.navUSDC();
+      return Number(ethers.formatUnits(nav, USDC_DECIMALS));
+    },
+    0,
+  );
 }
 
 export async function getUSDCAllowance(userAddress: string): Promise<number> {
-  try {
-    const usdc = usdcRead(readProvider());
-    const allowance: bigint = await usdc.allowance(userAddress, VAULT_ADDRESS);
-    return Number(ethers.formatUnits(allowance, USDC_DECIMALS));
-  } catch (err) {
-    console.error("getUSDCAllowance:", err);
-    return 0;
-  }
+  return withRetry(
+    "getUSDCAllowance",
+    async () => {
+      const usdc = usdcRead(readProvider());
+      const allowance: bigint = await usdc.allowance(userAddress, VAULT_ADDRESS);
+      return Number(ethers.formatUnits(allowance, USDC_DECIMALS));
+    },
+    0,
+  );
 }
 
 export interface WithdrawalView {
@@ -218,49 +255,48 @@ export interface WithdrawalView {
 export async function getUserWithdrawals(
   userAddress: string
 ): Promise<WithdrawalView[]> {
-  try {
-    const provider = readProvider();
-    const vault = vaultRead(provider);
-    const usdc = usdcRead(provider);
+  return withRetry(
+    "getUserWithdrawals",
+    async () => {
+      const provider = readProvider();
+      const vault = vaultRead(provider);
+      const usdc = usdcRead(provider);
 
-    const ids: bigint[] = await vault.userWithdrawals(userAddress);
-    if (ids.length === 0) return [];
+      const ids: bigint[] = await vault.userWithdrawals(userAddress);
+      if (ids.length === 0) return [];
 
-    const vaultUsdcBalRaw: bigint = await usdc.balanceOf(VAULT_ADDRESS);
-    let vaultBal = Number(ethers.formatUnits(vaultUsdcBalRaw, USDC_DECIMALS));
+      const vaultUsdcBalRaw: bigint = await usdc.balanceOf(VAULT_ADDRESS);
+      let vaultBal = Number(ethers.formatUnits(vaultUsdcBalRaw, USDC_DECIMALS));
 
-    const rows: WithdrawalView[] = await Promise.all(
-      ids.map(async (idBn) => {
+      const rows: WithdrawalView[] = [];
+      for (const idBn of ids) {
         const id = Number(idBn);
         const w = await vault.withdrawals(id);
-        // usdcOwed is stored in USDC units (6 decimals)
         const owed = Number(ethers.formatUnits(w.usdcOwed, USDC_DECIMALS));
-        return {
+        rows.push({
           id,
           user: w.user as string,
           usdcOwed: owed,
           settled: w.settled as boolean,
           claimable: false,
-        };
-      })
-    );
-
-    // Mark claimable when the vault has enough liquid USDC, greedily
-    // consumed in queue order for display purposes.
-    for (const row of rows) {
-      if (row.settled) continue;
-      if (vaultBal >= row.usdcOwed) {
-        row.claimable = true;
-        vaultBal -= row.usdcOwed;
+        });
       }
-    }
 
-    // Newest first
-    return rows.sort((a, b) => b.id - a.id);
-  } catch (err) {
-    console.error("getUserWithdrawals:", err);
-    return [];
-  }
+      // Mark claimable when the vault has enough liquid USDC, greedily
+      // consumed in queue order for display purposes.
+      for (const row of rows) {
+        if (row.settled) continue;
+        if (vaultBal >= row.usdcOwed) {
+          row.claimable = true;
+          vaultBal -= row.usdcOwed;
+        }
+      }
+
+      // Newest first
+      return rows.sort((a, b) => b.id - a.id);
+    },
+    [],
+  );
 }
 
 export interface UserBalances {
@@ -311,14 +347,15 @@ export async function getTokenBalance(
   userAddress: string,
   decimals: number
 ): Promise<number> {
-  try {
-    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, readProvider());
-    const bal: bigint = await contract.balanceOf(userAddress);
-    return Number(ethers.formatUnits(bal, decimals));
-  } catch (err) {
-    console.error("getTokenBalance:", err);
-    return 0;
-  }
+  return withRetry(
+    `getTokenBalance(${tokenAddress})`,
+    async () => {
+      const contract = new ethers.Contract(tokenAddress, ERC20_ABI, readProvider());
+      const bal: bigint = await contract.balanceOf(userAddress);
+      return Number(ethers.formatUnits(bal, decimals));
+    },
+    0,
+  );
 }
 
 // ============================================
@@ -360,14 +397,15 @@ export async function approveUSDCToLiFi(
  * Returns true if allowance >= MaxUint256 / 2 (practically infinite).
  */
 export async function hasLiFiApproval(userAddress: string): Promise<boolean> {
-  try {
-    const usdc = usdcRead(readProvider());
-    const allowance: bigint = await usdc.allowance(userAddress, CONTRACT_ADDRESSES.LIFI_DIAMOND);
-    return allowance >= ethers.MaxUint256 / BigInt(2);
-  } catch (err) {
-    console.error("hasLiFiApproval:", err);
-    return false;
-  }
+  return withRetry(
+    "hasLiFiApproval",
+    async () => {
+      const usdc = usdcRead(readProvider());
+      const allowance: bigint = await usdc.allowance(userAddress, CONTRACT_ADDRESSES.LIFI_DIAMOND);
+      return allowance >= ethers.MaxUint256 / BigInt(2);
+    },
+    false,
+  );
 }
 
 export async function depositToVault(

@@ -294,24 +294,19 @@ export default function StackAgentPage() {
 
     return (
         <MobileLayout activeTab="pay">
-            {/* ============================================================
-                HERO HEADER — branded identity strip (back + title + status)
-                ============================================================ */}
-            <div className="vault-card ink !rounded-none !rounded-b-2xl px-4 pt-safe md:pt-0 pb-6 !min-h-0">
-                <div className="relative z-10 flex items-center gap-3">
+            {/* Header — matches Swap Agent layout for visual consistency */}
+            <div className="bg-background px-4 pt-safe md:pt-0 pb-6">
+                <div className="flex items-center gap-4 mb-6">
                     <button
                         onClick={() => router.push('/dashboard')}
-                        className="btn-haptic p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors"
+                        className="p-2 rounded-full bg-muted hover:bg-secondary transition-colors"
                         aria-label="Back"
                     >
                         <ArrowLeft className="w-5 h-5" />
                     </button>
-                    <div className="w-10 h-10 rounded-xl bg-white/12 backdrop-blur flex items-center justify-center">
-                        <Sparkles className="w-5 h-5" />
-                    </div>
                     <div className="flex-1 min-w-0">
-                        <h1 className="text-title-2 truncate">Stack Agent</h1>
-                        <p className="text-footnote text-white/65 truncate">
+                        <h1 className="text-xl font-semibold truncate">Stack Agent</h1>
+                        <p className="text-sm text-muted-foreground truncate">
                             Auto-deposit USDC to Golda Vault
                         </p>
                     </div>
@@ -322,7 +317,7 @@ export default function StackAgentPage() {
             {/* ============================================================
                 BODY
                 ============================================================ */}
-            <div className="px-4 py-5 space-y-4 animate-fade-in">
+            <div className="px-4 pb-5 space-y-4 animate-fade-in">
                 {/* HEADLINE STATS — proper raised cards (not inside the hero) */}
                 <div className="grid grid-cols-2 gap-3">
                     <div className="ios-card-elev p-4">
@@ -696,16 +691,29 @@ function labelFor(freq: StackFrequency) {
 
 function StatusPill({ status }: { status: 'active' | 'paused' | 'setup' }) {
     const cfg = {
-        active: { bg: 'bg-success-soft', text: 'text-[var(--success)]', label: 'Active', dot: 'bg-[var(--success)]' },
-        paused: { bg: 'bg-white/10', text: 'text-white/80', label: 'Paused', dot: 'bg-white/60' },
-        setup: { bg: 'bg-warning-soft', text: 'text-[var(--warning)]', label: 'Setup', dot: 'bg-[var(--warning)]' },
+        active: {
+            bg: 'bg-success-soft',
+            text: 'text-[var(--success)]',
+            dot: 'bg-[var(--success)]',
+            label: 'Active',
+        },
+        paused: {
+            bg: 'bg-muted',
+            text: 'text-muted-foreground',
+            dot: 'bg-muted-foreground',
+            label: 'Paused',
+        },
+        setup: {
+            bg: 'bg-warning-soft',
+            text: 'text-[var(--warning)]',
+            dot: 'bg-[var(--warning)]',
+            label: 'Setup',
+        },
     }[status];
     return (
-        <span
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.12em] shrink-0 ${cfg.bg} ${cfg.text}`}
-        >
-            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-            {cfg.label}
-        </span>
+        <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full shrink-0 ${cfg.bg}`}>
+            <div className={`w-2 h-2 rounded-full animate-pulse ${cfg.dot}`} />
+            <span className={`text-xs font-medium ${cfg.text}`}>{cfg.label}</span>
+        </div>
     );
 }

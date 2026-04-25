@@ -9,7 +9,7 @@ import { NetworkPanel } from '@/components/network-panel';
 import { QuickActions } from '@/components/quick-actions';
 import { DepositDialog } from '@/components/deposit-dialog';
 import { WithdrawDialog } from '@/components/withdraw-dialog';
-import { DashboardSkeleton, TransactionListSkeleton } from '@/components/skeleton';
+import { DashboardSkeleton, Skeleton } from '@/components/skeleton';
 import { useGoldaVault } from '@/lib/hooks/useAureoContract';
 import { useTransactionHistory, formatTransactionDate } from '@/lib/hooks/useTransactionHistory';
 import type { SavingsAssetId } from '@/lib/types';
@@ -194,13 +194,23 @@ export default function DashboardPage() {
     const pendingWithdrawals = withdrawals.filter(w => !w.settled);
 
     // Recent Activity card — shared between mobile main column and desktop rail.
+    // The loading skeleton mirrors the exact row layout (same container,
+    // same `divide-y`, same `p-4` rows) so the card height is stable when
+    // data arrives — no scroll jump.
     const recentActivityCard = (
         <div className="ios-list">
             <div className="flex items-center justify-between p-4 border-b border-border">
-                <h3 className="text-headline">Recent Activity</h3>
+                <div className="flex items-center gap-2">
+                    <h3 className="text-headline">Recent Activity</h3>
+                    {!txLoading && transactions.length > 0 && (
+                        <span className="chip chip-info">
+                            {transactions.length}
+                        </span>
+                    )}
+                </div>
                 <button
                     onClick={() => router.push('/dashboard/history')}
-                    className="btn-haptic text-subhead font-semibold flex items-center gap-1 hover:opacity-70"
+                    className="btn-haptic text-subhead font-semibold flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
                 >
                     See All
                     <ChevronRight className="w-4 h-4" />
@@ -209,19 +219,44 @@ export default function DashboardPage() {
 
             <div className="divide-y divide-border">
                 {txLoading ? (
-                    <div className="p-3">
-                        <TransactionListSkeleton rows={4} />
-                    </div>
+                    // 3 rows × ~72px ≈ 216px — keeps the rail card close in
+                    // height to the empty state (~240px) so the desktop rail
+                    // (which has its own max-height + overflow) doesn't gain
+                    // an internal scrollbar that disappears once data loads.
+                    Array.from({ length: 3 }).map((_, i) => (
+                        <div
+                            key={i}
+                            className="p-4 flex items-center gap-3"
+                            aria-hidden
+                        >
+                            <Skeleton
+                                className="w-10 h-10 shrink-0"
+                                rounded="xl"
+                            />
+                            <div className="flex-1 min-w-0 space-y-1.5">
+                                <Skeleton className="h-4 w-40" rounded="md" />
+                                <Skeleton className="h-3 w-24" rounded="md" />
+                            </div>
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                <Skeleton className="h-4 w-16" rounded="md" />
+                                <Skeleton className="h-3 w-10" rounded="md" />
+                            </div>
+                        </div>
+                    ))
                 ) : transactions.length > 0 ? (
-                    transactions.slice(0, 4).map((tx) => {
-                        const { time } = formatTransactionDate(tx.timestamp);
+                    transactions.slice(0, 3).map((tx) => {
+                        const { time, date } = formatTransactionDate(tx.timestamp);
+                        const isInflow = tx.type === 'deposit' || tx.type === 'claim';
                         return (
-                            <div
+                            <a
                                 key={tx.id}
-                                className="p-4 flex items-center gap-3"
+                                href={`${explorerUrl}/tx/${tx.txHash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="group p-4 flex items-center gap-3 transition-colors hover:bg-surface focus-visible:bg-surface outline-none"
                             >
                                 <div
-                                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${getTxBg(tx.type)}`}
+                                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-border ${getTxBg(tx.type)}`}
                                 >
                                     {getTxIcon(tx.type)}
                                 </div>
@@ -230,40 +265,36 @@ export default function DashboardPage() {
                                         {tx.description}
                                     </p>
                                     <p className="text-footnote text-muted-foreground">
-                                        {time}
+                                        {date} · {time}
                                     </p>
                                 </div>
                                 <div className="text-right shrink-0">
                                     <p
                                         className={`text-subhead font-semibold font-num ${
-                                            tx.type === 'deposit' ||
-                                            tx.type === 'claim'
+                                            isInflow
                                                 ? 'text-[var(--success)]'
                                                 : 'text-foreground'
                                         }`}
                                     >
-                                        ${tx.amount.toFixed(2)}
+                                        {isInflow ? '+' : ''}${tx.amount.toFixed(2)}
                                     </p>
-                                    <a
-                                        href={`${explorerUrl}/tx/${tx.txHash}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-caption text-muted-foreground hover:text-foreground flex items-center gap-1 justify-end"
-                                    >
+                                    <p className="text-caption text-muted-foreground flex items-center gap-1 justify-end opacity-60 group-hover:opacity-100 transition-opacity">
                                         View <ExternalLink className="w-3 h-3" />
-                                    </a>
+                                    </p>
                                 </div>
-                            </div>
+                            </a>
                         );
                     })
                 ) : (
                     <div className="p-8 text-center">
-                        <Sparkles className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                        <p className="text-subhead text-muted-foreground">
+                        <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-surface flex items-center justify-center ring-1 ring-border">
+                            <Sparkles className="w-6 h-6 text-muted-foreground" />
+                        </div>
+                        <p className="text-subhead text-foreground">
                             No activity yet
                         </p>
                         <p className="text-footnote text-muted-foreground mt-1">
-                            Deposit USDC to get started!
+                            Deposit USDC to get started
                         </p>
                     </div>
                 )}

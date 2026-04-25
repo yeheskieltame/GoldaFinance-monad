@@ -51,7 +51,7 @@ export function QuickActions({ onDeposit, onWithdraw, onStack }: QuickActionsPro
             id: 'swap',
             label: 'Swap',
             icon: ArrowDownUp,
-            tone: 'text-white',
+            tone: 'text-background',
             chip: 'bg-foreground',
             path: '/dashboard/swap',
         },
@@ -60,7 +60,7 @@ export function QuickActions({ onDeposit, onWithdraw, onStack }: QuickActionsPro
             label: 'Bridge',
             icon: ArrowLeftRight,
             tone: 'text-white',
-            chip: 'bg-foreground',
+            chip: 'bg-[var(--purple-700)]',
             path: '/dashboard/bridge',
         },
         {
