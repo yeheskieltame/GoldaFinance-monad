@@ -140,6 +140,12 @@ export default function DeFiPage() {
 
     // Redirect if not authed
     useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    }, [history]);
+
+    // ---- Auth gate -----------------------------------------------------------
+    useEffect(() => {
         if (ready && !authenticated) router.push('/');
     }, [ready, authenticated, router]);
 
@@ -345,11 +351,12 @@ export default function DeFiPage() {
         }
     };
 
+    // ---- Loading state -------------------------------------------------------
     if (!ready || !authenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
-            </div>
+            <MobileLayout activeTab="pay">
+                <DetailPageSkeleton cards={4} />
+            </MobileLayout>
         );
     }
 
@@ -382,6 +389,7 @@ export default function DeFiPage() {
                             )}
                         </div>
                     </div>
+                    <StatusPill status={status} />
                 </div>
 
                 {/* Action bar */}
@@ -407,7 +415,34 @@ export default function DeFiPage() {
                 </div>
             </div>
 
-            <div className="px-4 py-4 space-y-4 pb-28">
+            {/* ============================================================
+                BODY
+                ============================================================ */}
+            <div className="px-4 pb-5 space-y-4 animate-fade-in">
+                {/* HEADLINE STATS — proper raised cards (not inside the hero) */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="ios-card-elev p-4">
+                        <p className="section-label mb-1">Total Stacked</p>
+                        <p className="text-title-1 font-num leading-tight">
+                            ${formatUSD(totalStacked)}
+                        </p>
+                        <p className="text-footnote text-muted-foreground mt-1 truncate">
+                            {history.length} stack{history.length === 1 ? '' : 's'}
+                            {totalShares > 0 && ` · ${totalShares.toFixed(4)} sh`}
+                        </p>
+                    </div>
+                    <div className="ios-card-elev p-4">
+                        <p className="section-label mb-1">Next Stack</p>
+                        <p className="text-title-1 font-num leading-tight">
+                            {countdown}
+                        </p>
+                        <p className="text-footnote text-muted-foreground mt-1 truncate">
+                            {settings.enabled
+                                ? `${labelFor(settings.frequency)} · $${formatUSD(settings.amountPerStack)}`
+                                : 'Auto-stacking is paused'}
+                        </p>
+                    </div>
+                </div>
 
                 {/* AI Recommendation banner */}
                 {recommendation && (

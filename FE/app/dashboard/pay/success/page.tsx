@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { CheckCircle, Share2, Copy, Check, ExternalLink } from 'lucide-react';
 import { useState, Suspense } from 'react';
 import { EXPLORER_URL } from '@/lib/services/contractService';
+import { MobileLayout } from '@/components/mobile-layout';
+import { DetailPageSkeleton } from '@/components/skeleton';
 
 function SuccessContent() {
     const router = useRouter();
@@ -159,12 +161,9 @@ function SuccessContent() {
 export default function PaySuccessPage() {
     return (
         <Suspense fallback={
-            <div className="mobile-container bg-background min-h-screen flex items-center justify-center">
-                <div className="text-center">
-                    <div className="w-16 h-16 border-4 border-foreground border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                    <p className="text-muted-foreground">Loading...</p>
-                </div>
-            </div>
+            <MobileLayout activeTab="pay">
+                <DetailPageSkeleton cards={2} />
+            </MobileLayout>
         }>
             <SuccessContent />
         </Suspense>

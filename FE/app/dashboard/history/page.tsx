@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePrivy } from '@privy-io/react-auth';
 import { MobileLayout } from '@/components/mobile-layout';
+import { HistoryPageSkeleton, TransactionListSkeleton } from '@/components/skeleton';
 import { useTransactionHistory, formatTransactionDate, Transaction } from '@/lib/hooks/useTransactionHistory';
 import { EXPLORER_URL } from '@/lib/services/contractService';
 import {
@@ -13,7 +14,6 @@ import {
     Sparkles,
     Search,
     Calendar,
-    Loader2,
     ExternalLink,
     RefreshCw,
     CheckCircle2,
@@ -64,9 +64,9 @@ export default function HistoryPage() {
 
     if (!ready || !authenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <Loader2 className="w-8 h-8 animate-spin text-foreground" />
-            </div>
+            <MobileLayout activeTab="history">
+                <HistoryPageSkeleton />
+            </MobileLayout>
         );
     }
 
@@ -121,7 +121,7 @@ export default function HistoryPage() {
 
     return (
         <MobileLayout activeTab="history">
-            <div className="bg-background sticky top-0 z-40 px-4 pt-12 pb-4 border-b border-border">
+            <div className="bg-background sticky top-0 z-40 px-4 pt-safe md:pt-0 pb-4 border-b border-border">
                 <div className="flex items-center gap-4 mb-4">
                     <button
                         onClick={() => router.push('/dashboard')}
@@ -173,11 +173,8 @@ export default function HistoryPage() {
             </div>
 
             {isLoading && transactions.length === 0 && (
-                <div className="flex items-center justify-center py-20">
-                    <div className="text-center space-y-4">
-                        <Loader2 className="w-10 h-10 animate-spin text-foreground mx-auto" />
-                        <p className="text-muted-foreground">Loading transactions from Monad...</p>
-                    </div>
+                <div className="px-4 py-4">
+                    <TransactionListSkeleton rows={6} />
                 </div>
             )}
 

@@ -159,7 +159,6 @@ FE/
 │   ├── mobile-layout.tsx       # Mobile container
 │   ├── bottom-navigation.tsx   # Bottom nav bar
 │   ├── wallet-card.tsx         # Bank-like card
-│   ├── quick-actions.tsx       # Action buttons
 │   ├── x402-payment-dialog.tsx # Payment confirmation
 │   └── ...
 ├── lib/

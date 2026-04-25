@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Home, Clock, Brain, User, Layers } from 'lucide-react';
+import { Home, Clock, Brain, User, Sparkles } from 'lucide-react';
 
 type ActiveTab = 'home' | 'history' | 'pay' | 'agent' | 'profile';
 
@@ -9,12 +9,16 @@ interface NavProps {
     activeTab: ActiveTab;
 }
 
+// Single-word labels keep every tab on one line in the floating tab bar.
+// The FAB icon (Sparkles) + brain icon already mark Stack/Swap as the AI
+// agents; the page hero spells out the full "Stack Agent" / "Swap Agent"
+// title once the user lands there.
 const NAV_ITEMS = [
-    { id: 'home',    label: 'Home',       icon: Home,   path: '/dashboard' },
-    { id: 'history', label: 'History',    icon: Clock,  path: '/dashboard/history' },
-    { id: 'pay',     label: 'DeFi',       icon: Layers, path: '/dashboard/pay', isCenter: true },
-    { id: 'agent',   label: 'Swap Agent', icon: Brain,  path: '/dashboard/agent' },
-    { id: 'profile', label: 'Profile',    icon: User,   path: '/dashboard/profile' },
+    { id: 'home',    label: 'Home',    icon: Home,     path: '/dashboard' },
+    { id: 'history', label: 'History', icon: Clock,    path: '/dashboard/history' },
+    { id: 'pay',     label: 'Stack',   icon: Sparkles, path: '/dashboard/pay', isCenter: true },
+    { id: 'agent',   label: 'Swap',    icon: Brain,    path: '/dashboard/agent' },
+    { id: 'profile', label: 'Profile', icon: User,     path: '/dashboard/profile' },
 ] as const;
 
 // =============================================================

@@ -7,7 +7,7 @@
    GOLDA — DESIGN SYSTEM
    - Mobile-first 480px column, scales to a 1.618 : 1 desktop rail
    - Golden-ratio inspired spacing (Fibonacci-aligned 8pt grid)
-   - Bold-monochrome editorial × red accent × iOS HIG cards
+   - Midnight-violet editorial × electric-purple accent × iOS HIG cards
    =========================================================== */
 
 :root {
@@ -62,159 +62,180 @@
   --leading-normal: 1.4;
   --leading-relaxed: 1.55;
 
-  /* ---------- COLORS (Light) ---------- */
-  --background: #ffffff;
-  --background-elevated: #ffffff;
-  --foreground: #0a0a0a;
-  --foreground-soft: #1a1a1a;
+  /* ---------- COLORS ---------- */
+  --electric-purple: #8b5cf6;
+  --pale-lilac: #ede9fe;
+  --midnight-violet: #120b29;
+  --rich-black: #050505;
 
-  --card: #ffffff;
-  --card-foreground: #0a0a0a;
-  --surface: #f5f4f1;
-  --surface-2: #ecebe7;
+  --background: var(--midnight-violet);
+  --background-elevated: color-mix(in srgb, var(--midnight-violet) 88%, var(--pale-lilac) 12%);
+  --foreground: var(--pale-lilac);
+  --foreground-soft: color-mix(in srgb, var(--pale-lilac) 88%, white 12%);
 
-  --muted: #f3f2ef;
-  --muted-foreground: #6b6a64;
-  --secondary: #f5f4f1;
-  --secondary-foreground: #0a0a0a;
+  --card: color-mix(in srgb, var(--midnight-violet) 88%, var(--rich-black) 12%);
+  --card-foreground: var(--pale-lilac);
+  --surface: color-mix(in srgb, var(--pale-lilac) 8%, transparent);
+  --surface-2: color-mix(in srgb, var(--pale-lilac) 14%, transparent);
 
-  --border: #ececea;
-  --border-strong: #d8d7d4;
-  --input: #ececea;
+  --muted: color-mix(in srgb, var(--pale-lilac) 10%, transparent);
+  --muted-foreground: color-mix(in srgb, var(--pale-lilac) 66%, var(--midnight-violet) 34%);
+  --secondary: color-mix(in srgb, var(--pale-lilac) 12%, transparent);
+  --secondary-foreground: var(--pale-lilac);
 
-  /* ---------- BRAND RED ---------- */
-  --red-50: #fff0f0;
-  --red-100: #ffdada;
-  --red-200: #ffb1b1;
-  --red-300: #ff7e7e;
-  --red-400: #ff4849;
-  --red-500: #ef2b2d;
-  --red-600: #d11d1f;
-  --red-700: #a91518;
-  --red-800: #821215;
-  --red-900: #5d1011;
+  --border: color-mix(in srgb, var(--pale-lilac) 14%, transparent);
+  --border-strong: color-mix(in srgb, var(--pale-lilac) 22%, transparent);
+  --input: color-mix(in srgb, var(--pale-lilac) 14%, transparent);
 
-  /* ---------- GOLD (kept for wallet variants) ---------- */
-  --gold-50: #fef9ec;
-  --gold-100: #fceec8;
-  --gold-200: #f9dc8d;
-  --gold-300: #f5c44e;
-  --gold-400: #f2af28;
-  --gold-500: #e89408;
-  --gold-600: #c76e06;
-  --gold-700: #a14c09;
+  /* ---------- BRAND PURPLE ---------- */
+  --purple-50: var(--pale-lilac);
+  --purple-100: color-mix(in srgb, var(--pale-lilac) 85%, var(--electric-purple) 15%);
+  --purple-200: color-mix(in srgb, var(--pale-lilac) 70%, var(--electric-purple) 30%);
+  --purple-300: color-mix(in srgb, var(--pale-lilac) 50%, var(--electric-purple) 50%);
+  --purple-400: color-mix(in srgb, var(--pale-lilac) 30%, var(--electric-purple) 70%);
+  --purple-500: var(--electric-purple);
+  --purple-600: color-mix(in srgb, var(--electric-purple) 82%, var(--midnight-violet) 18%);
+  --purple-700: color-mix(in srgb, var(--electric-purple) 68%, var(--midnight-violet) 32%);
+  --purple-800: color-mix(in srgb, var(--electric-purple) 50%, var(--midnight-violet) 50%);
+  --purple-900: var(--midnight-violet);
+
+  /* ---------- LEGACY COLOR ALIASES ---------- */
+  --red-50: var(--purple-50);
+  --red-100: var(--purple-100);
+  --red-200: var(--purple-200);
+  --red-300: var(--purple-300);
+  --red-400: var(--purple-400);
+  --red-500: var(--purple-500);
+  --red-600: var(--purple-600);
+  --red-700: var(--purple-700);
+  --red-800: var(--purple-800);
+  --red-900: var(--purple-900);
+
+  --gold-50: var(--pale-lilac);
+  --gold-100: var(--purple-100);
+  --gold-200: var(--purple-200);
+  --gold-300: var(--purple-300);
+  --gold-400: var(--purple-400);
+  --gold-500: var(--electric-purple);
+  --gold-600: var(--purple-700);
+  --gold-700: var(--midnight-violet);
 
   /* ---------- BRAND mapping ---------- */
-  --primary: #0a0a0a;
-  --primary-foreground: #ffffff;
-  --primary-hover: #1a1a1a;
+  --primary: var(--electric-purple);
+  --primary-foreground: var(--pale-lilac);
+  --primary-hover: var(--purple-600);
 
-  --accent: var(--red-500);
-  --accent-foreground: #ffffff;
+  --accent: var(--electric-purple);
+  --accent-foreground: var(--pale-lilac);
 
-  --ring: var(--red-500);
+  --ring: var(--electric-purple);
 
   /* ---------- SEMANTIC ---------- */
   --success: #16a34a;
   --success-foreground: #ffffff;
-  --success-soft: #e8f7ec;
+  --success-soft: rgba(22, 163, 74, 0.16);
 
   --warning: #ea580c;
   --warning-foreground: #ffffff;
-  --warning-soft: #fff1e6;
+  --warning-soft: rgba(234, 88, 12, 0.16);
 
-  --destructive: var(--red-500);
-  --destructive-foreground: #ffffff;
-  --destructive-soft: var(--red-50);
+  --destructive: var(--electric-purple);
+  --destructive-foreground: var(--pale-lilac);
+  --destructive-soft: color-mix(in srgb, var(--pale-lilac) 14%, transparent);
 
-  --info: #0a0a0a;
-  --info-foreground: #ffffff;
-  --info-soft: #f0eeea;
+  --info: var(--pale-lilac);
+  --info-foreground: var(--midnight-violet);
+  --info-soft: color-mix(in srgb, var(--pale-lilac) 10%, transparent);
 
-  --popover: #ffffff;
-  --popover-foreground: #0a0a0a;
+  --popover: color-mix(in srgb, var(--midnight-violet) 90%, var(--rich-black) 10%);
+  --popover-foreground: var(--pale-lilac);
 
   /* ---------- SHADOWS ---------- */
-  --shadow-xs: 0 1px 2px 0 rgba(10, 10, 10, 0.04);
-  --shadow-sm: 0 1px 3px 0 rgba(10, 10, 10, 0.04),
-    0 1px 2px -1px rgba(10, 10, 10, 0.03);
-  --shadow-md: 0 6px 20px -4px rgba(10, 10, 10, 0.07),
-    0 2px 4px -2px rgba(10, 10, 10, 0.04);
-  --shadow-lg: 0 16px 40px -10px rgba(10, 10, 10, 0.14),
-    0 4px 12px -4px rgba(10, 10, 10, 0.06);
-  --shadow-red: 0 12px 32px -8px rgba(239, 43, 45, 0.35);
-  --shadow-ink: 0 12px 32px -8px rgba(10, 10, 10, 0.28);
-  --shadow-gold: 0 12px 32px -8px rgba(232, 148, 8, 0.35);
+  --shadow-xs: 0 1px 2px 0 rgba(5, 5, 5, 0.35);
+  --shadow-sm: 0 1px 3px 0 rgba(5, 5, 5, 0.42),
+    0 1px 2px -1px rgba(5, 5, 5, 0.32);
+  --shadow-md: 0 10px 26px -6px rgba(5, 5, 5, 0.52),
+    0 2px 8px -4px rgba(5, 5, 5, 0.4);
+  --shadow-lg: 0 20px 48px -12px rgba(5, 5, 5, 0.68),
+    0 6px 18px -8px rgba(5, 5, 5, 0.48);
+  --shadow-purple: 0 14px 36px -10px rgba(139, 92, 246, 0.56);
+  --shadow-red: var(--shadow-purple);
+  --shadow-ink: 0 14px 36px -10px rgba(5, 5, 5, 0.72);
+  --shadow-lilac: 0 14px 36px -10px rgba(237, 233, 254, 0.24);
+  --shadow-gold: var(--shadow-lilac);
 
   /* ---------- GRADIENTS ---------- */
-  --gradient-red: linear-gradient(135deg, #ff4849 0%, #ef2b2d 55%, #a91518 100%);
-  --gradient-ink: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 60%, #000000 100%);
-  --gradient-gold: linear-gradient(135deg, #f2af28 0%, #e89408 55%, #a14c09 100%);
-  --gradient-paper: linear-gradient(180deg, #ffffff 0%, #faf9f6 100%);
-  --gradient-hero-bg: radial-gradient(at 88% 0%, #ffe6e6 0%, transparent 38%),
-    radial-gradient(at 0% 38%, #f4f3ef 0%, transparent 50%),
-    linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
+  --gradient-purple: linear-gradient(135deg, var(--pale-lilac) 0%, var(--electric-purple) 48%, var(--midnight-violet) 100%);
+  --gradient-red: var(--gradient-purple);
+  --gradient-ink: linear-gradient(135deg, var(--midnight-violet) 0%, color-mix(in srgb, var(--midnight-violet) 62%, var(--rich-black) 38%) 55%, var(--rich-black) 100%);
+  --gradient-lilac: linear-gradient(135deg, var(--pale-lilac) 0%, color-mix(in srgb, var(--pale-lilac) 54%, var(--electric-purple) 46%) 55%, var(--electric-purple) 100%);
+  --gradient-gold: var(--gradient-lilac);
+  --gradient-paper: linear-gradient(180deg, var(--midnight-violet) 0%, var(--rich-black) 100%);
+  --gradient-hero-bg: radial-gradient(at 88% 0%, rgba(139, 92, 246, 0.36) 0%, transparent 38%),
+    radial-gradient(at 0% 38%, rgba(237, 233, 254, 0.12) 0%, transparent 50%),
+    linear-gradient(180deg, var(--midnight-violet) 0%, var(--rich-black) 100%);
 }
 
 .dark {
-  --background: #050505;
-  --background-elevated: #0e0e0f;
-  --foreground: #f7f7f5;
-  --foreground-soft: #e8e7e3;
+  --background: var(--rich-black);
+  --background-elevated: color-mix(in srgb, var(--rich-black) 72%, var(--midnight-violet) 28%);
+  --foreground: var(--pale-lilac);
+  --foreground-soft: color-mix(in srgb, var(--pale-lilac) 88%, white 12%);
 
-  --card: #0e0e0f;
-  --card-foreground: #f7f7f5;
-  --surface: #131314;
-  --surface-2: #1c1c1e;
+  --card: color-mix(in srgb, var(--rich-black) 70%, var(--midnight-violet) 30%);
+  --card-foreground: var(--pale-lilac);
+  --surface: color-mix(in srgb, var(--pale-lilac) 8%, transparent);
+  --surface-2: color-mix(in srgb, var(--pale-lilac) 14%, transparent);
 
-  --muted: #161617;
-  --muted-foreground: #8b8a85;
-  --secondary: #131314;
-  --secondary-foreground: #f7f7f5;
+  --muted: color-mix(in srgb, var(--pale-lilac) 9%, transparent);
+  --muted-foreground: color-mix(in srgb, var(--pale-lilac) 64%, var(--rich-black) 36%);
+  --secondary: color-mix(in srgb, var(--pale-lilac) 10%, transparent);
+  --secondary-foreground: var(--pale-lilac);
 
-  --border: #1f1f21;
-  --border-strong: #2a2a2c;
-  --input: #1f1f21;
+  --border: color-mix(in srgb, var(--pale-lilac) 13%, transparent);
+  --border-strong: color-mix(in srgb, var(--pale-lilac) 22%, transparent);
+  --input: color-mix(in srgb, var(--pale-lilac) 13%, transparent);
 
-  --primary: #f7f7f5;
-  --primary-foreground: #0a0a0a;
-  --primary-hover: #ffffff;
+  --primary: var(--electric-purple);
+  --primary-foreground: var(--pale-lilac);
+  --primary-hover: var(--purple-400);
 
-  --accent: var(--red-500);
-  --accent-foreground: #ffffff;
+  --accent: var(--electric-purple);
+  --accent-foreground: var(--pale-lilac);
 
-  --info: #f7f7f5;
-  --info-foreground: #0a0a0a;
-  --info-soft: rgba(247, 247, 245, 0.08);
+  --info: var(--pale-lilac);
+  --info-foreground: var(--midnight-violet);
+  --info-soft: color-mix(in srgb, var(--pale-lilac) 9%, transparent);
 
-  --popover: #0e0e0f;
-  --popover-foreground: #f7f7f5;
+  --popover: color-mix(in srgb, var(--rich-black) 72%, var(--midnight-violet) 28%);
+  --popover-foreground: var(--pale-lilac);
 
-  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
-  --shadow-sm: 0 2px 8px -1px rgba(0, 0, 0, 0.55),
-    0 1px 3px -1px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 8px 24px -4px rgba(0, 0, 0, 0.55),
-    0 2px 6px -2px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 16px 40px -8px rgba(0, 0, 0, 0.65),
-    0 4px 12px -4px rgba(0, 0, 0, 0.4);
-  --shadow-red: 0 12px 32px -8px rgba(239, 43, 45, 0.5);
+  --shadow-xs: 0 1px 2px 0 rgba(5, 5, 5, 0.5);
+  --shadow-sm: 0 2px 8px -1px rgba(5, 5, 5, 0.55),
+    0 1px 3px -1px rgba(5, 5, 5, 0.35);
+  --shadow-md: 0 8px 24px -4px rgba(5, 5, 5, 0.55),
+    0 2px 6px -2px rgba(5, 5, 5, 0.35);
+  --shadow-lg: 0 16px 40px -8px rgba(5, 5, 5, 0.65),
+    0 4px 12px -4px rgba(5, 5, 5, 0.4);
+  --shadow-purple: 0 12px 32px -8px rgba(139, 92, 246, 0.58);
+  --shadow-red: var(--shadow-purple);
 
   --success-soft: rgba(22, 163, 74, 0.16);
   --warning-soft: rgba(234, 88, 12, 0.16);
-  --destructive-soft: rgba(239, 43, 45, 0.16);
+  --destructive-soft: rgba(139, 92, 246, 0.16);
 
-  --gradient-paper: linear-gradient(180deg, #050505 0%, #0a0a0a 100%);
+  --gradient-paper: linear-gradient(180deg, var(--rich-black) 0%, var(--midnight-violet) 100%);
   --gradient-hero-bg: radial-gradient(
       at 88% 0%,
-      rgba(239, 43, 45, 0.18) 0%,
+      rgba(139, 92, 246, 0.24) 0%,
       transparent 40%
     ),
     radial-gradient(
       at 0% 38%,
-      rgba(247, 247, 245, 0.04) 0%,
+      rgba(237, 233, 254, 0.08) 0%,
       transparent 50%
     ),
-    linear-gradient(180deg, #050505 0%, #050505 100%);
+    linear-gradient(180deg, var(--rich-black) 0%, var(--rich-black) 100%);
 }
 
 /* ===== Tailwind theme bridge ===== */
@@ -252,6 +273,20 @@
   --color-ring: var(--ring);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+
+  --color-electric-purple: var(--electric-purple);
+  --color-pale-lilac: var(--pale-lilac);
+  --color-midnight-violet: var(--midnight-violet);
+  --color-rich-black: var(--rich-black);
+
+  --color-purple-50: var(--purple-50);
+  --color-purple-100: var(--purple-100);
+  --color-purple-200: var(--purple-200);
+  --color-purple-300: var(--purple-300);
+  --color-purple-400: var(--purple-400);
+  --color-purple-500: var(--purple-500);
+  --color-purple-600: var(--purple-600);
+  --color-purple-700: var(--purple-700);
 
   --color-red-50: var(--red-50);
   --color-red-100: var(--red-100);
@@ -446,16 +481,27 @@
     gap: var(--space-8);
     align-items: start;
   }
+  /* Sticky right rail. Scroll is preserved (mouse-wheel / touch / keyboard
+     keep working when the rail's content slightly exceeds the viewport),
+     but the visual scrollbar is hidden so a transient "scrollbar appears
+     for a moment during initial load and then disappears" effect doesn't
+     happen — same pattern used by Twitter, Linear, Notion, etc. */
   .shell-rail {
     position: sticky;
     top: var(--space-8);
     max-height: calc(100vh - var(--space-16));
     overflow-y: auto;
-    scrollbar-width: thin;
+    scrollbar-width: none;          /* Firefox */
+    -ms-overflow-style: none;       /* legacy IE/Edge */
   }
-  /* Desktop replaces bottom nav with a top strip; reserve the body padding */
+  .shell-rail::-webkit-scrollbar {  /* Chromium / WebKit */
+    width: 0;
+    height: 0;
+    display: none;
+  }
+  /* Desk-nav is sticky in-flow already; this is just a small breath under it */
   .shell-content {
-    padding-top: var(--space-21);
+    padding-top: var(--space-6);
   }
 }
 
@@ -477,20 +523,22 @@
 }
 
 /* =============================================================
-   iOS TAB BAR (mobile)
+   iOS TAB BAR (mobile) — floating, rounded, glassmorphic
    ============================================================= */
 .ios-tab-bar {
   position: fixed;
-  bottom: 0;
+  bottom: max(12px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
-  width: 100%;
-  max-width: var(--content-mobile);
-  padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  width: calc(100% - 24px);
+  max-width: calc(var(--content-mobile) - 24px);
+  padding: 8px 10px;
   background: color-mix(in srgb, var(--background-elevated) 82%, transparent);
-  backdrop-filter: saturate(180%) blur(24px);
-  -webkit-backdrop-filter: saturate(180%) blur(24px);
-  border-top: 0.5px solid var(--border);
+  backdrop-filter: saturate(180%) blur(28px);
+  -webkit-backdrop-filter: saturate(180%) blur(28px);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-lg);
   z-index: 100;
   display: flex;
   justify-content: space-around;
@@ -509,22 +557,27 @@
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 6px 12px;
+  padding: 6px 6px;
   border-radius: var(--radius-md);
   transition:
     transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
     color 0.2s ease;
   cursor: pointer;
-  min-width: 56px;
+  min-width: 0;
   min-height: 44px;
+  flex: 1 1 0;
   color: var(--muted-foreground);
 }
 .ios-tab-item:active { transform: scale(0.96); }
 .ios-tab-item.active { color: var(--foreground); }
-.ios-tab-item .ios-tab-label {
+.ios-tab-label {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.015em;
+  white-space: nowrap;       /* never wrap to a second line */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* Center FAB */
@@ -535,16 +588,18 @@
   flex-direction: column;
   align-items: center;
   gap: 3px;
+  flex: 1 1 0;        /* match width of regular tabs */
+  min-width: 0;
 }
 .ios-fab-btn {
   width: 58px;
   height: 58px;
   border-radius: 50%;
-  background: var(--gradient-red);
+  background: var(--gradient-purple);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-red);
+  box-shadow: var(--shadow-purple);
   transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
   cursor: pointer;
   border: 4px solid var(--background);
@@ -584,8 +639,8 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
-    border-radius: var(--radius-full);
+    padding: 9px 16px;
+    border-radius: var(--radius-lg);
     font-size: 14px;
     font-weight: 600;
     color: var(--muted-foreground);
@@ -596,8 +651,8 @@
     background: var(--surface);
   }
   .desk-nav-link.active {
-    color: var(--background);
-    background: var(--foreground);
+    color: var(--accent-foreground);
+    background: var(--accent);
   }
 }
 
@@ -663,20 +718,21 @@
   border: 0.5px solid var(--border);
 }
 .action-pill.primary {
-  background: var(--foreground);
-  color: var(--background);
+  background: var(--accent);
+  color: var(--accent-foreground);
+  box-shadow: var(--shadow-purple);
   border-color: transparent;
 }
 .action-pill.danger {
-  background: var(--red-500);
+  background: var(--accent);
   color: white;
-  box-shadow: var(--shadow-red);
+  box-shadow: var(--shadow-purple);
   border-color: transparent;
 }
 .action-pill.gold {
-  background: var(--gradient-gold);
-  color: white;
-  box-shadow: var(--shadow-gold);
+  background: var(--gradient-lilac);
+  color: var(--midnight-violet);
+  box-shadow: var(--shadow-lilac);
   border-color: transparent;
 }
 
@@ -761,14 +817,14 @@
   box-shadow: var(--shadow-ink);
 }
 .vault-card.red {
-  background: var(--gradient-red);
+  background: var(--gradient-purple);
   color: white;
-  box-shadow: var(--shadow-red);
+  box-shadow: var(--shadow-purple);
 }
 .vault-card.gold {
-  background: var(--gradient-gold);
-  color: white;
-  box-shadow: var(--shadow-gold);
+  background: var(--gradient-lilac);
+  color: var(--midnight-violet);
+  box-shadow: var(--shadow-lilac);
 }
 .vault-card.ink::before,
 .vault-card.red::before,
@@ -791,6 +847,206 @@
 
 @media (min-width: 768px) {
   .vault-card { padding: var(--space-6); min-height: 260px; }
+}
+
+/* =============================================================
+   BANKING CARD — premium credit-card chrome (opt-in via .bank-card)
+   Layered on top of .vault-card.ink for the dashboard hero.
+   ============================================================= */
+.bank-card {
+  width: 100%;
+  min-height: 232px;
+  padding: var(--space-5) var(--space-6);
+  gap: 0;
+  justify-content: space-between;
+  border: 1px solid color-mix(in srgb, var(--pale-lilac) 14%, transparent);
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(139, 92, 246, 0.42) 0%, transparent 48%),
+    radial-gradient(110% 80% at 0% 100%, rgba(237, 233, 254, 0.10) 0%, transparent 50%),
+    linear-gradient(135deg,
+      var(--midnight-violet) 0%,
+      color-mix(in srgb, var(--midnight-violet) 60%, var(--rich-black) 40%) 60%,
+      var(--rich-black) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(5, 5, 5, 0.4),
+    var(--shadow-ink);
+  isolation: isolate;
+}
+
+@media (min-width: 768px) {
+  .bank-card {
+    min-height: 252px;
+    padding: var(--space-6) var(--space-7);
+  }
+}
+
+/* Soft diagonal sheen — replaces the white spotlight from .vault-card::before */
+.bank-card::before {
+  background:
+    linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.05) 50%, transparent 62%),
+    radial-gradient(circle at 88% 14%, rgba(255, 255, 255, 0.18) 0%, transparent 38%),
+    radial-gradient(circle at 12% 96%, rgba(255, 255, 255, 0.06) 0%, transparent 42%);
+  z-index: 0;
+}
+
+/* Hover sheen sweep */
+.bank-card .bank-shine {
+  position: absolute;
+  top: -55%;
+  left: -25%;
+  width: 50%;
+  height: 220%;
+  background: linear-gradient(110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 70%);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 1;
+  transform: translateX(-40%) rotate(18deg);
+}
+@keyframes bank-shine {
+  0% { transform: translateX(-40%) rotate(18deg); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateX(360%) rotate(18deg); opacity: 0; }
+}
+@media (hover: hover) {
+  .bank-card:hover .bank-shine {
+    animation: bank-shine 1.4s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+}
+
+/* EMV-style chip */
+.bank-chip {
+  position: relative;
+  width: 38px;
+  height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--electric-purple) 55%, var(--pale-lilac) 45%) 0%,
+    var(--electric-purple) 50%,
+    color-mix(in srgb, var(--electric-purple) 60%, var(--midnight-violet) 40%) 100%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.45),
+    inset 0 -2px 4px rgba(5, 5, 5, 0.35),
+    0 1px 2px rgba(5, 5, 5, 0.4);
+  flex-shrink: 0;
+}
+/* Chip contact pads (the little gold squares on a real EMV chip) */
+.bank-chip::before {
+  content: "";
+  position: absolute;
+  inset: 4px 5px;
+  background:
+    linear-gradient(to right,  rgba(5, 5, 5, 0.32) 50%, transparent 50%) 0 0 / 33% 100%,
+    linear-gradient(to bottom, rgba(5, 5, 5, 0.32) 50%, transparent 50%) 0 0 / 100% 50%;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+/* Wallet PAN — formatted like a card number */
+.bank-pan {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 1px rgba(5, 5, 5, 0.5);
+}
+@media (min-width: 768px) {
+  .bank-pan { font-size: 17px; }
+}
+
+/* Network badge (e.g., MONAD) */
+.bank-network {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--pale-lilac) 14%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--pale-lilac) 22%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.92);
+}
+.bank-network-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pale-lilac);
+  box-shadow: 0 0 6px rgba(237, 233, 254, 0.7);
+}
+
+/* Asset chip on top-right beside brand wordmark */
+.bank-asset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--pale-lilac) 12%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--pale-lilac) 18%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* Brand wordmark on the card */
+.bank-brand {
+  font-family: var(--font-display), var(--font-inter), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.96);
+}
+.bank-brand-sub {
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 1px;
+}
+
+/* =============================================================
+   SKELETON LOADING — shimmer placeholder
+   ============================================================= */
+@keyframes skel-shimmer {
+  0%   { background-position: -160% 0; }
+  100% { background-position:  160% 0; }
+}
+.skel {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--pale-lilac) 8%, transparent);
+}
+.skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--pale-lilac) 14%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 60% 100%;
+  background-repeat: no-repeat;
+  animation: skel-shimmer 1.6s ease-in-out infinite;
+}
+.skel-circle { border-radius: 9999px; }
+.skel-pill   { border-radius: var(--radius-full); }
+@media (prefers-reduced-motion: reduce) {
+  .skel::after { animation: none; opacity: 0.6; }
 }
 
 /* Status chip */
@@ -824,7 +1080,7 @@
   color: var(--muted-foreground);
 }
 
-/* Brand mark — two overlapping discs (red + ink) */
+/* Brand mark — two overlapping discs (purple + ink) */
 .golda-mark {
   position: relative;
   display: inline-flex;
@@ -839,7 +1095,7 @@
   width: var(--mark-h, 56px);
   height: var(--mark-h, 56px);
   border-radius: 50%;
-  background: var(--red-500);
+  background: var(--electric-purple);
   position: absolute;
   top: 0;
 }
@@ -872,7 +1128,7 @@
   outline: none;
   background: var(--background-elevated);
   border-color: var(--ring);
-  box-shadow: 0 0 0 3px rgba(239, 43, 45, 0.15);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.22);
 }
 
 /* Toast */
@@ -917,38 +1173,8 @@
   color: white;
   box-shadow: var(--shadow-ink);
 }
-.wallet-card-gold { background: var(--gradient-gold); box-shadow: var(--shadow-gold); }
+.wallet-card-gold { background: var(--gradient-lilac); color: var(--midnight-violet); box-shadow: var(--shadow-lilac); }
 .wallet-card-blue { background: var(--gradient-ink); box-shadow: var(--shadow-ink); }
-
-.quick-actions {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--space-2);
-}
-.quick-action-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-2);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  transition: background-color 0.2s ease, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
-  cursor: pointer;
-  border: 0.5px solid var(--border);
-}
-.quick-action-item:hover { background: var(--surface-2); }
-.quick-action-item:active { transform: scale(0.97); }
-.quick-action-icon {
-  width: 44px; height: 44px;
-  border-radius: var(--radius-md);
-  display: flex; align-items: center; justify-content: center;
-}
-.quick-action-label {
-  font-size: 12px; font-weight: 600;
-  color: var(--foreground);
-  letter-spacing: -0.005em;
-}
 
 .transaction-item {
   display: flex; align-items: center; gap: 12px;

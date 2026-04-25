@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { WalletCard } from '@/components/wallet-card';
-import { QuickActions } from '@/components/quick-actions';
+import { NetworkPanel } from '@/components/network-panel';
 import { DepositDialog } from '@/components/deposit-dialog';
 import { WithdrawDialog } from '@/components/withdraw-dialog';
+import { DashboardSkeleton, Skeleton } from '@/components/skeleton';
 import { useGoldaVault } from '@/lib/hooks/useAureoContract';
 import { useTransactionHistory, formatTransactionDate } from '@/lib/hooks/useTransactionHistory';
 import type { SavingsAssetId } from '@/lib/types';
@@ -155,12 +156,9 @@ export default function DashboardPage() {
 
     if (!ready || !authenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <div className="text-center space-y-4">
-                    <Loader2 className="w-10 h-10 animate-spin text-foreground mx-auto" />
-                    <p className="text-muted-foreground">Loading...</p>
-                </div>
-            </div>
+            <MobileLayout activeTab="home">
+                <DashboardSkeleton />
+            </MobileLayout>
         );
     }
 
@@ -194,7 +192,119 @@ export default function DashboardPage() {
 
     const pendingWithdrawals = withdrawals.filter(w => !w.settled);
 
-    // Right rail (≥lg desktop only) — sticky vault NAV summary.
+    // Recent Activity card — shared between mobile main column and desktop rail.
+    // The loading skeleton mirrors the exact row layout (same container,
+    // same `divide-y`, same `p-4` rows) so the card height is stable when
+    // data arrives — no scroll jump.
+    const recentActivityCard = (
+        <div className="ios-list">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+                <div className="flex items-center gap-2">
+                    <h3 className="text-headline">Recent Activity</h3>
+                    {!txLoading && transactions.length > 0 && (
+                        <span className="chip chip-info">
+                            {transactions.length}
+                        </span>
+                    )}
+                </div>
+                <button
+                    onClick={() => router.push('/dashboard/history')}
+                    className="btn-haptic text-subhead font-semibold flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                    See All
+                    <ChevronRight className="w-4 h-4" />
+                </button>
+            </div>
+
+            <div className="divide-y divide-border">
+                {txLoading ? (
+                    // 3 rows × ~72px ≈ 216px — keeps the rail card close in
+                    // height to the empty state (~240px) so the desktop rail
+                    // (which has its own max-height + overflow) doesn't gain
+                    // an internal scrollbar that disappears once data loads.
+                    Array.from({ length: 3 }).map((_, i) => (
+                        <div
+                            key={i}
+                            className="p-4 flex items-center gap-3"
+                            aria-hidden
+                        >
+                            <Skeleton
+                                className="w-10 h-10 shrink-0"
+                                rounded="xl"
+                            />
+                            <div className="flex-1 min-w-0 space-y-1.5">
+                                <Skeleton className="h-4 w-40" rounded="md" />
+                                <Skeleton className="h-3 w-24" rounded="md" />
+                            </div>
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                <Skeleton className="h-4 w-16" rounded="md" />
+                                <Skeleton className="h-3 w-10" rounded="md" />
+                            </div>
+                        </div>
+                    ))
+                ) : transactions.length > 0 ? (
+                    transactions.slice(0, 3).map((tx) => {
+                        const { time, date } = formatTransactionDate(tx.timestamp);
+                        const isInflow = tx.type === 'deposit' || tx.type === 'claim';
+                        return (
+                            <a
+                                key={tx.id}
+                                href={`${explorerUrl}/tx/${tx.txHash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="group p-4 flex items-center gap-3 transition-colors hover:bg-surface focus-visible:bg-surface outline-none"
+                            >
+                                <div
+                                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-border ${getTxBg(tx.type)}`}
+                                >
+                                    {getTxIcon(tx.type)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-headline truncate">
+                                        {tx.description}
+                                    </p>
+                                    <p className="text-footnote text-muted-foreground">
+                                        {date} · {time}
+                                    </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                    <p
+                                        className={`text-subhead font-semibold font-num ${
+                                            isInflow
+                                                ? 'text-[var(--success)]'
+                                                : 'text-foreground'
+                                        }`}
+                                    >
+                                        {isInflow ? '+' : ''}${tx.amount.toFixed(2)}
+                                    </p>
+                                    <p className="text-caption text-muted-foreground flex items-center gap-1 justify-end opacity-60 group-hover:opacity-100 transition-opacity">
+                                        View <ExternalLink className="w-3 h-3" />
+                                    </p>
+                                </div>
+                            </a>
+                        );
+                    })
+                ) : (
+                    // py-12 + w-14 icon ≈ 215px — sized to match the 3-row
+                    // skeleton above so the card height stays stable when
+                    // loading completes with no transactions.
+                    <div className="px-6 py-12 text-center">
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-surface flex items-center justify-center ring-1 ring-border">
+                            <Sparkles className="w-6 h-6 text-muted-foreground" />
+                        </div>
+                        <p className="text-subhead text-foreground font-semibold">
+                            No activity yet
+                        </p>
+                        <p className="text-footnote text-muted-foreground mt-1.5">
+                            Deposit USDC to get started
+                        </p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+
+    // Right rail (md+ — sidebar on desktop, stacked-below-main on tablet).
     const desktopRail = (
         <div className="space-y-4 stagger-in">
             <div className="ios-card-elev p-5">
@@ -223,35 +333,39 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            <div className="ios-card p-5">
-                <p className="section-label mb-3">Network</p>
-                <p className="text-headline">Monad Mainnet</p>
-                <div className="mt-3 space-y-1 text-footnote text-muted-foreground font-mono break-all">
-                    <p>Vault: {contractAddresses.GOLDA_VAULT}</p>
-                    <p>USDC: {contractAddresses.USDC}</p>
-                    {walletAddress && <p>You: {walletAddress}</p>}
-                </div>
-            </div>
-
+            {/* Your Assets — backing breakdown */}
             <div className="ios-card-elev p-5">
                 <p className="section-label mb-3">Your Assets</p>
                 <div className="space-y-3">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <span className="text-yellow-500">🥇</span>
+                            <span className="w-7 h-7 rounded-lg bg-[var(--electric-purple)]/15 text-[var(--electric-purple)] flex items-center justify-center text-sm">
+                                Au
+                            </span>
                             <span className="text-subhead">XAUt0</span>
                         </div>
                         <span className="text-title-3 font-num">{balances.xaut.toFixed(6)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <span className="text-orange-500">₿</span>
+                            <span className="w-7 h-7 rounded-lg bg-[var(--pale-lilac)]/12 text-foreground flex items-center justify-center text-sm font-semibold">
+                                ₿
+                            </span>
                             <span className="text-subhead">WBTC</span>
                         </div>
                         <span className="text-title-3 font-num">{balances.wbtc.toFixed(8)}</span>
                     </div>
                 </div>
             </div>
+
+            <NetworkPanel
+                vaultAddress={contractAddresses.GOLDA_VAULT}
+                usdcAddress={contractAddresses.USDC}
+                walletAddress={walletAddress}
+                explorerBaseUrl={explorerUrl}
+            />
+
+            {recentActivityCard}
         </div>
     );
 
@@ -279,7 +393,7 @@ export default function DashboardPage() {
             )}
 
             {/* Header */}
-            <div className="px-4 md:px-0 pt-12 md:pt-0 pb-6">
+            <div className="px-4 md:px-0 pt-safe md:pt-0 pb-6">
                 <div className="flex items-center justify-between mb-6">
                     <div>
                         <p className="section-label">Welcome back</p>
@@ -381,11 +495,6 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
-                {/* Quick Actions */}
-                <div className="ios-card-elev p-4">
-                    <QuickActions />
-                </div>
-
                 {/* Portfolio Summary — visible on mobile only (desktop uses rail) */}
                 <div className="grid grid-cols-2 gap-3 lg:hidden">
                     <div className="ios-card p-4">
@@ -408,8 +517,11 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
-                {/* Asset Balances — XAUT & WBTC */}
-                <div className="ios-card-elev p-4">
+                {/* Asset Balances — XAUT & WBTC.
+                    Hidden on desktop (lg+) because the right rail already
+                    shows the same breakdown — avoids duplicate "Your Assets"
+                    cards visible side-by-side. */}
+                <div className="ios-card-elev p-4 lg:hidden">
                     <div className="flex items-center justify-between mb-3">
                         <div>
                             <h3 className="text-headline">Your Assets</h3>
@@ -569,94 +681,19 @@ export default function DashboardPage() {
                     </div>
                 )}
 
-                {/* Recent Transactions */}
-                <div className="ios-list">
-                    <div className="flex items-center justify-between p-4 border-b border-border">
-                        <h3 className="text-headline">Recent Activity</h3>
-                        <button
-                            onClick={() => router.push('/dashboard/history')}
-                            className="btn-haptic text-subhead font-semibold flex items-center gap-1 hover:opacity-70"
-                        >
-                            See All
-                            <ChevronRight className="w-4 h-4" />
-                        </button>
-                    </div>
-
-                    <div className="divide-y divide-border">
-                        {txLoading ? (
-                            <div className="p-8 text-center">
-                                <Loader2 className="w-6 h-6 animate-spin text-foreground mx-auto" />
-                            </div>
-                        ) : transactions.length > 0 ? (
-                            transactions.slice(0, 4).map((tx) => {
-                                const { time } = formatTransactionDate(tx.timestamp);
-                                return (
-                                    <div
-                                        key={tx.id}
-                                        className="p-4 flex items-center gap-3"
-                                    >
-                                        <div
-                                            className={`w-10 h-10 rounded-xl flex items-center justify-center ${getTxBg(tx.type)}`}
-                                        >
-                                            {getTxIcon(tx.type)}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-headline truncate">
-                                                {tx.description}
-                                            </p>
-                                            <p className="text-footnote text-muted-foreground">
-                                                {time}
-                                            </p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p
-                                                className={`text-subhead font-semibold font-num ${
-                                                    tx.type === 'deposit' ||
-                                                    tx.type === 'claim'
-                                                        ? 'text-[var(--success)]'
-                                                        : 'text-foreground'
-                                                }`}
-                                            >
-                                                ${tx.amount.toFixed(2)}
-                                            </p>
-                                            <a
-                                                href={`${explorerUrl}/tx/${tx.txHash}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-caption text-muted-foreground hover:text-foreground flex items-center gap-1 justify-end"
-                                            >
-                                                View <ExternalLink className="w-3 h-3" />
-                                            </a>
-                                        </div>
-                                    </div>
-                                );
-                            })
-                        ) : (
-                            <div className="p-8 text-center">
-                                <Sparkles className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                                <p className="text-subhead text-muted-foreground">
-                                    No activity yet
-                                </p>
-                                <p className="text-footnote text-muted-foreground mt-1">
-                                    Deposit USDC to get started!
-                                </p>
-                            </div>
-                        )}
-                    </div>
+                {/* Mobile-only: Network panel, then Recent Activity below it.
+                    On md+ both live in the right rail to keep the columns balanced. */}
+                <div className="md:hidden">
+                    <NetworkPanel
+                        vaultAddress={contractAddresses.GOLDA_VAULT}
+                        usdcAddress={contractAddresses.USDC}
+                        walletAddress={walletAddress}
+                        explorerBaseUrl={explorerUrl}
+                    />
                 </div>
 
-                {/* Contract info — mobile-only (desktop has it in rail) */}
-                <div className="ios-card p-3 text-footnote text-muted-foreground space-y-1 lg:hidden">
-                    <p className="font-medium text-foreground">Network: Monad Mainnet</p>
-                    <p className="font-mono truncate">
-                        Vault: {contractAddresses.GOLDA_VAULT}
-                    </p>
-                    <p className="font-mono truncate">
-                        USDC: {contractAddresses.USDC}
-                    </p>
-                    <p className="font-mono truncate">
-                        Wallet: {walletAddress || 'Not connected'}
-                    </p>
+                <div className="md:hidden">
+                    {recentActivityCard}
                 </div>
             </div>
         </MobileLayout>

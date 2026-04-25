@@ -86,16 +86,16 @@ export default function LandingPage() {
 
                         <h1 className="text-large-title md:text-display lg:text-hero leading-[0.96] mb-5">
                             Save in{' '}
-                            <span className="bg-gradient-to-r from-amber-600 to-amber-500 bg-clip-text text-transparent">
+                            <span className="bg-gradient-to-r from-[var(--pale-lilac)] to-[var(--accent)] bg-clip-text text-transparent">
                                 Gold
                             </span>{' '}
                             or{' '}
-                            <span className="bg-gradient-to-r from-[var(--accent)] to-[var(--red-700)] bg-clip-text text-transparent">
+                            <span className="bg-gradient-to-r from-[var(--accent)] to-[var(--pale-lilac)] bg-clip-text text-transparent">
                                 BTC
                             </span>
                             <br />
                             Deposit in{' '}
-                            <span className="bg-gradient-to-r from-emerald-500 to-emerald-400 bg-clip-text text-transparent">
+                            <span className="bg-gradient-to-r from-[var(--pale-lilac)] to-[var(--purple-300)] bg-clip-text text-transparent">
                                 USDC
                             </span>
                         </h1>
@@ -128,11 +128,11 @@ export default function LandingPage() {
                     <div className="relative rounded-3xl p-5 md:p-8 overflow-hidden ios-card-elev">
                         <div
                             className="pointer-events-none absolute -top-12 -right-12 w-56 h-56 rounded-full opacity-25 blur-3xl"
-                            style={{ background: 'var(--gradient-red)' }}
+                            style={{ background: 'var(--gradient-purple)' }}
                         />
                         <div
                             className="pointer-events-none absolute -bottom-10 -left-10 w-44 h-44 rounded-full opacity-20 blur-3xl"
-                            style={{ background: 'var(--gradient-gold)' }}
+                            style={{ background: 'var(--gradient-lilac)' }}
                         />
 
                         <div className="relative vault-card ink !min-h-0">

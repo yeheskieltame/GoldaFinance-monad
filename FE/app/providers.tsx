@@ -29,7 +29,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4 p-8 max-w-md">
-          <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-white text-2xl font-bold mx-auto">
+          <div className="w-16 h-16 rounded-xl bg-accent flex items-center justify-center text-accent-foreground text-2xl font-bold mx-auto">
             G
           </div>
           <h2 className="text-2xl font-bold">Configuration Required</h2>
@@ -47,7 +47,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
               href="https://dashboard.privy.io"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-amber-600 dark:text-amber-400 hover:underline"
+              className="text-accent hover:underline"
             >
               dashboard.privy.io
             </a>
@@ -64,9 +64,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         loginMethods: ['email', 'wallet', 'google'],
 
         appearance: {
-          theme: 'light',
-          accentColor: '#F59E0B',
-          logo: '/aureo-logo.svg',
+          theme: 'dark',
+          accentColor: '#8B5CF6',
+          logo: '/Icon.png',
           showWalletLoginFirst: false,
         },
 
