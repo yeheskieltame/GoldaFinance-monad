@@ -6,7 +6,6 @@ import { useState, useEffect } from 'react';
 import { MobileLayout } from '@/components/mobile-layout';
 import { WalletCard } from '@/components/wallet-card';
 import { NetworkPanel } from '@/components/network-panel';
-import { QuickActions } from '@/components/quick-actions';
 import { DepositDialog } from '@/components/deposit-dialog';
 import { WithdrawDialog } from '@/components/withdraw-dialog';
 import { DashboardSkeleton, Skeleton } from '@/components/skeleton';
@@ -286,14 +285,17 @@ export default function DashboardPage() {
                         );
                     })
                 ) : (
-                    <div className="p-8 text-center">
-                        <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-surface flex items-center justify-center ring-1 ring-border">
+                    // py-12 + w-14 icon ≈ 215px — sized to match the 3-row
+                    // skeleton above so the card height stays stable when
+                    // loading completes with no transactions.
+                    <div className="px-6 py-12 text-center">
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-surface flex items-center justify-center ring-1 ring-border">
                             <Sparkles className="w-6 h-6 text-muted-foreground" />
                         </div>
-                        <p className="text-subhead text-foreground">
+                        <p className="text-subhead text-foreground font-semibold">
                             No activity yet
                         </p>
-                        <p className="text-footnote text-muted-foreground mt-1">
+                        <p className="text-footnote text-muted-foreground mt-1.5">
                             Deposit USDC to get started
                         </p>
                     </div>
@@ -493,11 +495,6 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
-                {/* Quick Actions */}
-                <div className="ios-card-elev p-4">
-                    <QuickActions />
-                </div>
-
                 {/* Portfolio Summary — visible on mobile only (desktop uses rail) */}
                 <div className="grid grid-cols-2 gap-3 lg:hidden">
                     <div className="ios-card p-4">
@@ -520,8 +517,11 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
-                {/* Asset Balances — XAUT & WBTC */}
-                <div className="ios-card-elev p-4">
+                {/* Asset Balances — XAUT & WBTC.
+                    Hidden on desktop (lg+) because the right rail already
+                    shows the same breakdown — avoids duplicate "Your Assets"
+                    cards visible side-by-side. */}
+                <div className="ios-card-elev p-4 lg:hidden">
                     <div className="flex items-center justify-between mb-3">
                         <div>
                             <h3 className="text-headline">Your Assets</h3>
