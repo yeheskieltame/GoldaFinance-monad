@@ -37,7 +37,6 @@ import {
     ArrowRight,
     Coins,
 } from 'lucide-react';
-import { DetailPageSkeleton } from '@/components/skeleton';
 
 // ─── AI analysis ─────────────────────────────────────────────────────────────
 
